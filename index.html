@@ -1,0 +1,1021 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Decathlon | Sistema de Análisis de Multiimplantaciones y Ventas</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            decathlon: {
+              blue: '#0082c3',
+              dark: '#006699',
+              navy: '#001489',
+              light: '#e0f2fe'
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- Supabase JS Client Oficial -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  
+  <!-- Chart.js para visualización de ventas e indicadores -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <!-- Estilos personalizados -->
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body class="bg-slate-50 text-slate-900 min-h-screen flex flex-col font-sans">
+
+  <!-- ========================================================================= -->
+  <!-- VISTA DE LOGIN (Autenticación exclusiva con Supabase Auth)                 -->
+  <!-- ========================================================================= -->
+  <div id="auth-container" class="flex-1 flex flex-col justify-center items-center px-4 py-12">
+    <div class="max-w-md w-full bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden">
+      <!-- Encabezado Decathlon -->
+      <div class="bg-[#0082c3] p-8 text-white text-center relative">
+        <div class="inline-flex items-center justify-center w-14 h-14 bg-white/10 rounded-2xl mb-3 backdrop-blur-sm">
+          <i data-lucide="layers" class="w-8 h-8 text-white"></i>
+        </div>
+        <h1 class="text-2xl font-black tracking-tight uppercase">DECATHLON</h1>
+        <p class="text-xs font-medium text-sky-100 mt-1 uppercase tracking-wider">Sistema de Multiimplantaciones y Ventas</p>
+        <p class="text-[11px] text-sky-200 mt-0.5">IU Digital de Antioquia • Proyecto Integrador 1</p>
+      </div>
+
+      <!-- Formulario de Inicio de Sesión -->
+      <div class="p-8">
+        <form onsubmit="handleLogin(event)" class="space-y-4">
+          <div id="login-error" class="hidden p-3 bg-red-50 border border-red-200 text-red-700 text-xs rounded-lg font-medium"></div>
+
+          <div>
+            <label class="block text-xs font-semibold text-slate-700 mb-1">Nombre de Usuario *</label>
+            <div class="relative">
+              <span class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-slate-400">
+                <i data-lucide="user" class="w-4 h-4"></i>
+              </span>
+              <input id="login-nombre" type="text" required placeholder="Ej. Nombre de Usuario" 
+                class="w-full pl-9 pr-3 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm focus:bg-white focus:ring-2 focus:ring-sky-500 focus:outline-none transition" />
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-xs font-semibold text-slate-700 mb-1">Contraseña *</label>
+            <div class="relative">
+              <span class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-slate-400">
+                <i data-lucide="lock" class="w-4 h-4"></i>
+              </span>
+              <input id="login-password" type="password" required placeholder="••••••••" 
+                class="w-full pl-9 pr-3 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm focus:bg-white focus:ring-2 focus:ring-sky-500 focus:outline-none transition" />
+            </div>
+          </div>
+
+          <button id="btn-login-submit" type="submit" 
+            class="w-full py-2.5 px-4 bg-[#0082c3] hover:bg-[#006699] text-white font-semibold rounded-lg text-sm shadow transition duration-150 flex items-center justify-center gap-2">
+            <span>Ingresar al Sistema</span>
+            <i data-lucide="arrow-right" class="w-4 h-4"></i>
+          </button>
+        </form>
+
+        <p class="text-[11px] text-slate-400 text-center mt-6">
+          Acceso restringido para colaboradores de Decathlon. Las cuentas son gestionadas por el Administrador.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- APLICACIÓN PRINCIPAL (AUTENTICADA)                                         -->
+  <!-- ========================================================================= -->
+  <div id="app-container" class="hidden flex-1 flex flex-col">
+    <!-- Barra Superior -->
+    <header class="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <div class="w-9 h-9 rounded-lg bg-[#0082c3] text-white flex items-center justify-center font-black text-lg shadow-sm">
+            D
+          </div>
+          <div>
+            <span class="font-black text-lg text-slate-900 tracking-tight">DECATHLON</span>
+            <span class="hidden sm:inline-block text-xs font-semibold text-slate-400 ml-2 pl-2 border-l border-slate-200">
+              Multiimplantaciones & Ventas
+            </span>
+          </div>
+        </div>
+
+        <!-- Estado de Supabase, Usuario y Acciones -->
+        <div class="flex items-center gap-3">
+          <div class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-100 text-slate-700 text-xs font-medium">
+            <span id="connection-status-dot" class="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
+            <span id="connection-status-text">Supabase</span>
+          </div>
+
+          <!-- Perfil de Usuario y Rol -->
+          <div class="flex items-center gap-2 pl-2 border-l border-slate-200">
+            <div class="text-right hidden sm:block">
+              <div id="user-display-name" class="text-xs font-bold text-slate-800">Usuario</div>
+              <div id="user-display-role" class="text-[10px] font-semibold text-sky-700">Rol</div>
+            </div>
+            <button onclick="handleLogout()" 
+              class="p-2 rounded-lg text-slate-500 hover:text-red-600 hover:bg-red-50 transition" 
+              title="Cerrar sesión">
+              <i data-lucide="log-out" class="w-4 h-4"></i>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Barra de Navegación por Pestañas / Desktop (oculta en móvil) -->
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 hidden md:flex space-x-1 overflow-x-auto border-t border-slate-100 text-xs py-1">
+        <button id="nav-multiimplantaciones" onclick="switchTab('multiimplantaciones')" 
+          class="flex items-center gap-1.5 px-3 py-2 rounded-md font-semibold transition text-sky-700 bg-sky-50">
+          <i data-lucide="list" class="w-4 h-4"></i>
+          <span>Consultar Multiimplantaciones</span>
+        </button>
+
+        <button id="nav-registro" onclick="switchTab('registro')" 
+          class="flex items-center gap-1.5 px-3 py-2 rounded-md font-medium text-slate-600 hover:bg-slate-100 transition">
+          <i data-lucide="plus-circle" class="w-4 h-4"></i>
+          <span>Registrar Multiimplantación</span>
+        </button>
+
+        <button id="nav-ventas" onclick="switchTab('ventas')" 
+          class="flex items-center gap-1.5 px-3 py-2 rounded-md font-medium text-slate-600 hover:bg-slate-100 transition">
+          <i data-lucide="trending-up" class="w-4 h-4"></i>
+          <span>Registrar Ventas</span>
+        </button>
+
+        <button id="nav-evaluacion" onclick="switchTab('evaluacion')" 
+          class="flex items-center gap-1.5 px-3 py-2 rounded-md font-medium text-slate-600 hover:bg-slate-100 transition">
+          <i data-lucide="bar-chart-3" class="w-4 h-4"></i>
+          <span>Comparar &amp; Evaluar</span>
+        </button>
+
+        <button id="nav-productos" onclick="switchTab('productos')" 
+          class="hidden flex items-center gap-1.5 px-3 py-2 rounded-md font-medium text-slate-600 hover:bg-slate-100 transition">
+          <i data-lucide="package" class="w-4 h-4"></i>
+          <span>Productos</span>
+        </button>
+
+        <button id="nav-usuarios" onclick="switchTab('usuarios')" 
+          class="hidden flex items-center gap-1.5 px-3 py-2 rounded-md font-medium text-slate-600 hover:bg-slate-100 transition">
+          <i data-lucide="users" class="w-4 h-4"></i>
+          <span>Gestión de Usuarios</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Navegación inferior para móvil (solo visible en pantallas pequeñas) -->
+    <nav id="bottom-nav" class="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-slate-200 shadow-lg flex items-stretch">
+      <button id="mob-nav-multiimplantaciones" onclick="switchTab('multiimplantaciones')"
+        class="flex-1 flex flex-col items-center justify-center py-2 gap-0.5 text-sky-700 bg-sky-50 transition">
+        <i data-lucide="list" class="w-5 h-5"></i>
+        <span class="text-[10px] font-semibold">Consultar</span>
+      </button>
+      <button id="mob-nav-registro" onclick="switchTab('registro')"
+        class="flex-1 flex flex-col items-center justify-center py-2 gap-0.5 text-slate-500 hover:bg-slate-50 transition">
+        <i data-lucide="plus-circle" class="w-5 h-5"></i>
+        <span class="text-[10px] font-medium">Registrar</span>
+      </button>
+      <button id="mob-nav-ventas" onclick="switchTab('ventas')"
+        class="flex-1 flex flex-col items-center justify-center py-2 gap-0.5 text-slate-500 hover:bg-slate-50 transition">
+        <i data-lucide="trending-up" class="w-5 h-5"></i>
+        <span class="text-[10px] font-medium">Ventas</span>
+      </button>
+      <button id="mob-nav-evaluacion" onclick="switchTab('evaluacion')"
+        class="flex-1 flex flex-col items-center justify-center py-2 gap-0.5 text-slate-500 hover:bg-slate-50 transition">
+        <i data-lucide="bar-chart-3" class="w-5 h-5"></i>
+        <span class="text-[10px] font-medium">Evaluar</span>
+      </button>
+      <button id="mob-nav-productos" onclick="switchTab('productos')"
+        class="hidden flex-1 flex flex-col items-center justify-center py-2 gap-0.5 text-slate-500 hover:bg-slate-50 transition">
+        <i data-lucide="package" class="w-5 h-5"></i>
+        <span class="text-[10px] font-medium">Productos</span>
+      </button>
+      <button id="mob-nav-usuarios" onclick="switchTab('usuarios')"
+        class="hidden flex-1 flex flex-col items-center justify-center py-2 gap-0.5 text-slate-500 hover:bg-slate-50 transition">
+        <i data-lucide="users" class="w-5 h-5"></i>
+        <span class="text-[10px] font-medium">Usuarios</span>
+      </button>
+    </nav>
+
+    <!-- Contenido Principal (padding-bottom en móvil para que no tape la bottom nav) -->
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 w-full flex-1 pb-24 md:pb-6">
+
+      <!-- ===================================================================== -->
+      <!-- SECCIÓN CU03: CONSULTAR MULTIIMPLANTACIONES                           -->
+      <!-- ===================================================================== -->
+      <section id="section-multiimplantaciones" class="space-y-6">
+        <!-- Tarjetas de Métricas Globales / KPIs (Recomendación 1) -->
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
+          <div class="p-4 bg-white rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
+            <div>
+              <span class="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">Multis Activas</span>
+              <span id="kpi-multis-activas" class="text-2xl font-black text-sky-700 mt-1 block">0</span>
+              <span id="kpi-multis-total" class="text-[10px] text-slate-400 block">de 0 totales</span>
+            </div>
+            <div class="w-10 h-10 rounded-xl bg-sky-50 text-sky-600 flex items-center justify-center">
+              <i data-lucide="layers" class="w-5 h-5"></i>
+            </div>
+          </div>
+
+          <div class="p-4 bg-white rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
+            <div>
+              <span class="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">Productos en Multi</span>
+              <span id="kpi-prods-multi" class="text-2xl font-black text-emerald-700 mt-1 block">0</span>
+              <span class="text-[10px] text-slate-400 block">en exhibición adicional</span>
+            </div>
+            <div class="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+              <i data-lucide="package" class="w-5 h-5"></i>
+            </div>
+          </div>
+
+          <div class="p-4 bg-white rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
+            <div>
+              <span class="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">Éxito Comercial</span>
+              <span id="kpi-tasa-exito" class="text-2xl font-black text-indigo-700 mt-1 block">0%</span>
+              <span class="text-[10px] text-slate-400 block">con ventas positivas</span>
+            </div>
+            <div class="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
+              <i data-lucide="trending-up" class="w-5 h-5"></i>
+            </div>
+          </div>
+
+          <div class="p-4 bg-white rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
+            <div>
+              <span class="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">Deporte Líder</span>
+              <span id="kpi-deporte-lider" class="text-base font-black text-slate-800 mt-1 block truncate max-w-[120px] capitalize">—</span>
+              <span id="kpi-deporte-uds" class="text-[10px] text-slate-400 block">más unidades vendidas</span>
+            </div>
+            <div class="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center">
+              <i data-lucide="award" class="w-5 h-5"></i>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+          <div>
+            <h2 class="text-xl font-bold text-slate-900">Historial de Multiimplantaciones</h2>
+            <p class="text-sm text-slate-500">Monitorea los productos en ubicaciones adicionales y su vigencia.</p>
+          </div>
+          <!-- Filtros de búsqueda -->
+          <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+            <div class="relative">
+              <input id="filter-multi-text" type="text" placeholder="Buscar por ubicación o producto..." 
+                class="pl-9 pr-3 py-1.5 text-xs bg-white border border-slate-300 rounded-lg w-full sm:w-64 focus:ring-2 focus:ring-sky-500 focus:outline-none" />
+              <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-2.5 top-2"></i>
+            </div>
+            <select id="filter-multi-estado" 
+              class="py-1.5 px-3 text-xs bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:outline-none">
+              <option value="todos">Todos los estados</option>
+              <option value="activas">Solo Activas</option>
+              <option value="finalizadas">Solo Finalizadas</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Tabla de Multiimplantaciones -->
+        <div class="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+          <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse">
+              <thead>
+                <tr class="bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider">
+                  <th class="px-5 py-3">Ubicación Adicional</th>
+                  <th class="px-5 py-3">Fecha Inicio</th>
+                  <th class="px-5 py-3">Productos Vinculados</th>
+                  <th class="px-5 py-3">Auditoría</th>
+                  <th class="px-5 py-3">Estado</th>
+                  <th class="px-5 py-3 text-right">Acción</th>
+                </tr>
+              </thead>
+              <tbody id="tabla-multi-body" class="divide-y divide-slate-100 text-sm">
+                <!-- Se llena dinámicamente -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===================================================================== -->
+      <!-- SECCIÓN CU01: REGISTRAR MULTIIMPLANTACIÓN                             -->
+      <!-- ===================================================================== -->
+      <section id="section-registro" class="hidden max-w-2xl mx-auto space-y-6">
+        <div class="bg-white p-6 sm:p-8 rounded-2xl border border-slate-200 shadow-sm">
+          <div class="border-b border-slate-100 pb-4 mb-5">
+            <h2 class="text-xl font-bold text-slate-900">Registro de Multiimplantación</h2>
+            <p class="text-xs text-slate-500 mt-1">Crea una nueva exhibición comercial o añade productos a una multiimplantación existente.</p>
+          </div>
+
+          <!-- Selector de Modo: Nueva vs Existente -->
+          <div class="flex p-1 bg-slate-100 rounded-xl mb-5 text-xs font-semibold">
+            <button type="button" id="tab-multi-modo-nueva" onclick="cambiarModoRegistroMulti('nueva')" 
+              class="flex-1 py-2 rounded-lg bg-white text-sky-700 shadow-sm transition flex items-center justify-center gap-1.5">
+              <i data-lucide="plus-circle" class="w-3.5 h-3.5"></i>
+              <span>Nueva Multiimplantación</span>
+            </button>
+            <button type="button" id="tab-multi-modo-existente" onclick="cambiarModoRegistroMulti('existente')" 
+              class="flex-1 py-2 rounded-lg text-slate-600 hover:text-slate-900 transition flex items-center justify-center gap-1.5">
+              <i data-lucide="link" class="w-3.5 h-3.5"></i>
+              <span>Seleccionar Existente</span>
+            </button>
+          </div>
+
+          <form id="form-multiimplantacion" onsubmit="handleRegistrarMultiimplantacion(event)" class="space-y-5">
+            <!-- Campos para MODO NUEVA -->
+            <div id="box-modo-nueva" class="space-y-4">
+              <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">Ubicación en Tienda *</label>
+                <input id="reg-ubicacion" type="text" placeholder="Ej. Cabecera Pasillo 3 (Senderismo), Isla Cajas Rápidas..." 
+                  class="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm focus:bg-white focus:ring-2 focus:ring-sky-500 focus:outline-none" />
+              </div>
+
+              <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">Fecha de Inicio *</label>
+                <input id="reg-fecha-inicio" type="date" 
+                  class="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm focus:bg-white focus:ring-2 focus:ring-sky-500 focus:outline-none" />
+              </div>
+            </div>
+
+            <!-- Campos para MODO EXISTENTE -->
+            <div id="box-modo-existente" class="hidden space-y-3">
+              <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">Seleccionar Multiimplantación Existente *</label>
+                <select id="reg-multi-existente" onchange="alSeleccionarMultiExistente()"
+                  class="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm focus:bg-white focus:ring-2 focus:ring-sky-500 focus:outline-none font-medium">
+                  <option value="">-- Selecciona una multiimplantación --</option>
+                </select>
+              </div>
+              <div id="info-multi-existente" class="hidden p-3.5 bg-sky-50 border border-sky-200 rounded-xl text-xs space-y-1 text-sky-900">
+                <!-- Información detallada inyectada dinámicamente -->
+              </div>
+            </div>
+
+            <!-- SELECTOR DE PRODUCTOS REDISEÑADO CON CATEGORÍAS Y CASILLAS -->
+            <div class="pt-2 border-t border-slate-100">
+              <div class="flex items-center justify-between mb-2">
+                <label class="block text-xs font-bold text-slate-800">
+                  Seleccionar Productos a Multiimplantar *
+                </label>
+                <div class="flex items-center gap-2">
+                  <span id="reg-prod-count-badge" class="text-[11px] font-bold text-sky-700 bg-sky-50 px-2.5 py-0.5 rounded-full border border-sky-200">
+                    0 seleccionados
+                  </span>
+                  <button type="button" onclick="deseleccionarTodosProductos()" class="text-[11px] text-slate-400 hover:text-red-600 underline">
+                    Desmarcar
+                  </button>
+                </div>
+              </div>
+
+              <!-- Filtro por Deporte / Categoría -->
+              <div class="mb-2.5">
+                <span class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Filtrar por deporte / categoría:</span>
+                <div id="reg-prod-categoria-chips" class="flex flex-wrap gap-1.5">
+                  <!-- Chips inyectados dinámicamente -->
+                </div>
+              </div>
+
+              <!-- Buscador por nombre o referencia -->
+              <div class="relative mb-2.5">
+                <input id="reg-prod-search" type="text" oninput="filtrarListaProductosCheckbox()" placeholder="Buscar por nombre o referencia (ej. DEC-8492019)..." 
+                  class="w-full pl-8 pr-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs focus:bg-white focus:ring-2 focus:ring-sky-500 focus:outline-none" />
+                <i data-lucide="search" class="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5"></i>
+              </div>
+
+              <!-- Lista con casillas de verificación (Checkboxes) -->
+              <div id="reg-prod-checkbox-container" class="max-h-60 overflow-y-auto border border-slate-200 rounded-xl bg-slate-50 divide-y divide-slate-200">
+                <!-- Checkboxes inyectados dinámicamente -->
+              </div>
+              <p class="text-[11px] text-slate-400 mt-1.5">Haz clic en la fila o casilla para marcar múltiples productos deportivos.</p>
+            </div>
+
+            <div class="pt-2">
+              <button id="btn-submit-multi" type="submit" class="w-full py-3 bg-[#0082c3] hover:bg-[#006699] text-white font-bold rounded-lg text-sm shadow transition flex items-center justify-center gap-2">
+                <i data-lucide="check" class="w-4 h-4"></i>
+                <span id="btn-submit-multi-text">Confirmar y Guardar Multiimplantación</span>
+              </button>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <!-- ===================================================================== -->
+      <!-- SECCIÓN CU02: REGISTRAR VENTAS SEMANALES                              -->
+      <!-- ===================================================================== -->
+      <section id="section-ventas" class="hidden grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div class="lg:col-span-1 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+          <div class="border-b border-slate-100 pb-4 mb-4">
+            <h2 id="ventas-panel-title" class="text-lg font-bold text-slate-900">Registrar Ventas</h2>
+            <p id="ventas-panel-desc" class="text-xs text-slate-500 mt-1">Ingresa el total de unidades vendidas semanalmente.</p>
+          </div>
+
+          <form id="form-ventas" onsubmit="handleRegistrarVentas(event)" class="space-y-4">
+            <div>
+              <div class="flex items-center justify-between mb-1">
+                <label class="block text-xs font-bold text-slate-700">Producto Deportivo *</label>
+                <label class="inline-flex items-center gap-1 cursor-pointer text-[11px] text-sky-700 font-semibold select-none">
+                  <input type="checkbox" id="filtro-ventas-solo-activos" onchange="populateProductSelects()"
+                    class="w-3.5 h-3.5 rounded text-sky-600 focus:ring-sky-500 border-slate-300">
+                  <span>Solo en multi activa</span>
+                </label>
+              </div>
+              <select id="venta-producto" required onchange="actualizarInfoProductoVenta()"
+                class="w-full px-3 py-2.5 bg-slate-50 border border-slate-300 rounded-lg text-sm focus:bg-white focus:ring-2 focus:ring-sky-500 focus:outline-none">
+                <!-- Llenado dinámico -->
+              </select>
+              <div id="venta-prod-multi-info" class="hidden mt-1.5 p-2 bg-sky-50 border border-sky-200 rounded-lg text-[11px] text-sky-900 flex items-center gap-1.5">
+                <!-- Inyectado dinámicamente -->
+              </div>
+            </div>
+
+            <div class="space-y-1.5">
+              <div class="flex items-center justify-between">
+                <span class="text-xs font-bold text-slate-700">Período de Venta *</span>
+                <button type="button" onclick="asignarSemanaActualVenta()" class="text-[11px] text-sky-700 hover:text-sky-900 font-semibold underline flex items-center gap-1">
+                  <i data-lucide="calendar" class="w-3 h-3"></i>
+                  <span>Usar semana actual</span>
+                </button>
+              </div>
+              <div class="grid grid-cols-2 sm:grid-cols-2 gap-3">
+                <div>
+                  <label class="block text-[10px] font-semibold text-slate-500 mb-0.5">Semana (1-53)</label>
+                  <input id="venta-semana" type="number" min="1" max="53" required 
+                    class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-sm focus:bg-white focus:ring-2 focus:ring-sky-500 focus:outline-none" />
+                </div>
+                <div>
+                  <label class="block text-[10px] font-semibold text-slate-500 mb-0.5">Año</label>
+                  <input id="venta-anio" type="number" min="2020" max="2035" required 
+                    class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-sm focus:bg-white focus:ring-2 focus:ring-sky-500 focus:outline-none" />
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <label class="block text-xs font-bold text-slate-700 mb-1">Unidades Vendidas *</label>
+              <input id="venta-unidades" type="number" min="0" required placeholder="0" 
+                class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-sm focus:bg-white focus:ring-2 focus:ring-sky-500 focus:outline-none" />
+            </div>
+
+            <button id="btn-guardar-venta" type="submit" class="w-full py-2.5 bg-[#0082c3] hover:bg-[#006699] text-white font-bold rounded-lg text-sm shadow transition flex items-center justify-center gap-2">
+              <i data-lucide="plus" class="w-4 h-4"></i>
+              <span id="btn-guardar-venta-text">Guardar Registro Semanal</span>
+            </button>
+          </form>
+        </div>
+
+        <!-- Tabla de ventas con Buscador y Filtro (Recomendación 2) -->
+        <div class="lg:col-span-2 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 mb-4 border-b border-slate-100">
+            <div>
+              <h3 class="text-base font-bold text-slate-900">Historial de Ventas Semanales</h3>
+              <p class="text-xs text-slate-500">Haz clic en Editar para corregir cantidades.</p>
+            </div>
+            <!-- Filtro y búsqueda en ventas -->
+            <div class="flex items-center gap-2">
+              <div class="relative">
+                <input id="filter-ventas-text" type="text" placeholder="Buscar por producto..." oninput="renderVentasTable()"
+                  class="pl-8 pr-2.5 py-1.5 text-xs bg-slate-50 border border-slate-300 rounded-lg w-44 focus:bg-white focus:ring-2 focus:ring-sky-500 focus:outline-none" />
+                <i data-lucide="search" class="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5"></i>
+              </div>
+              <select id="filter-ventas-anio" onchange="renderVentasTable()"
+                class="py-1.5 px-2 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:bg-white focus:ring-2 focus:ring-sky-500 focus:outline-none font-medium">
+                <option value="todos">Todos los años</option>
+              </select>
+            </div>
+          </div>
+          <div class="overflow-x-auto flex-1">
+            <table class="w-full text-left text-xs">
+              <thead>
+                <tr class="bg-slate-50 border-b border-slate-200 font-bold text-slate-500 uppercase">
+                  <th class="px-5 py-2.5">Producto</th>
+                  <th class="px-4 py-2.5 text-center">Semana</th>
+                  <th class="px-4 py-2.5 text-center">Año</th>
+                  <th class="px-4 py-2.5 text-right">Unidades Vendidas</th>
+                  <th class="px-4 py-2.5 text-right">Acción</th>
+                </tr>
+              </thead>
+              <tbody id="tabla-ventas-body" class="divide-y divide-slate-100"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===================================================================== -->
+      <!-- SECCIÓN CU04 & CU05: COMPARAR VENTAS Y EVALUAR RESULTADO              -->
+      <!-- ===================================================================== -->
+      <section id="section-evaluacion" class="hidden space-y-6">
+        <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+          <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-slate-100 pb-5">
+            <div>
+              <h2 class="text-xl font-bold text-slate-900">Evaluación de Efectividad de Multiimplantación</h2>
+              <p class="text-xs text-slate-500 mt-1">Compara el comportamiento de ventas antes y después de la intervención comercial.</p>
+            </div>
+            <!-- Selectores de análisis y Exportación -->
+            <div class="flex flex-wrap items-center gap-2.5 w-full sm:w-auto">
+              <select id="eval-multi" class="w-full sm:w-auto px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs font-semibold focus:ring-2 focus:ring-sky-500 focus:outline-none sm:max-w-xs"></select>
+              <select id="eval-producto" class="w-full sm:w-auto px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs font-semibold focus:ring-2 focus:ring-sky-500 focus:outline-none sm:max-w-xs"></select>
+              
+              <!-- Botón Exportar CSV -->
+              <button type="button" id="btn-exportar-csv" onclick="exportarEvaluacionCSV()" title="Exportar reporte en CSV para Excel"
+                class="px-3 py-2 bg-white hover:bg-slate-100 text-slate-700 font-semibold rounded-lg text-xs border border-slate-300 transition flex items-center gap-1.5 shadow-sm">
+                <i data-lucide="download" class="w-3.5 h-3.5 text-slate-500"></i>
+                <span>Exportar CSV</span>
+              </button>
+              <!-- Botón Imprimir / PDF -->
+              <button type="button" onclick="window.print()" title="Imprimir informe o guardar en PDF"
+                class="px-3 py-2 bg-white hover:bg-slate-100 text-slate-700 font-semibold rounded-lg text-xs border border-slate-300 transition flex items-center gap-1.5 shadow-sm">
+                <i data-lucide="printer" class="w-3.5 h-3.5 text-slate-500"></i>
+                <span>Imprimir / PDF</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Mensaje cuando la multi no tiene productos o faltan datos -->
+          <div id="eval-no-data" class="hidden mt-6"></div>
+
+          <!-- Vista General: Rendimiento de TODOS los productos de la multi -->
+          <div id="eval-overview-container" class="hidden mt-6 space-y-6">
+            <div class="bg-slate-50 p-4 rounded-xl border border-slate-200">
+              <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
+                <div>
+                  <h3 id="eval-multi-titulo" class="text-sm font-bold text-slate-900">Rendimiento General de Productos en la Multiimplantación</h3>
+                  <p id="eval-multi-subtitulo" class="text-xs text-slate-500">Comportamiento antes y durante la multiimplantación para cada producto vinculado.</p>
+                </div>
+                <span id="eval-multi-badge-total" class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-sky-100 text-sky-800 border border-sky-200 self-start sm:self-auto">
+                  0 productos
+                </span>
+              </div>
+
+              <!-- Tabla de Rendimiento de Todos los Productos -->
+              <div class="overflow-x-auto bg-white rounded-lg border border-slate-200">
+                <table class="w-full text-left text-xs">
+                  <thead>
+                    <tr class="bg-slate-100/80 border-b border-slate-200 font-bold text-slate-600 uppercase tracking-wider">
+                      <th class="px-4 py-2.5">Producto</th>
+                      <th class="px-3 py-2.5">Categoría</th>
+                      <th class="px-3 py-2.5 text-center">Estado en Multi</th>
+                      <th class="px-3 py-2.5 text-right">Prom. Antes</th>
+                      <th class="px-3 py-2.5 text-right">Prom. Con Multi</th>
+                      <th class="px-3 py-2.5 text-right">Variación</th>
+                      <th class="px-4 py-2.5 text-center">Impacto Comercial</th>
+                      <th class="px-3 py-2.5 text-right">Acción</th>
+                    </tr>
+                  </thead>
+                  <tbody id="eval-tabla-productos-body" class="divide-y divide-slate-100">
+                    <!-- Filas inyectadas dinámicamente -->
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- Resultados y Métricas para el producto en FOCO -->
+          <div id="eval-results-container" class="hidden mt-6 space-y-6">
+            <div class="flex items-center justify-between bg-sky-50/70 border border-sky-200 p-3 rounded-xl">
+              <div class="flex items-center gap-2">
+                <span class="w-2 h-2 rounded-full bg-sky-600"></span>
+                <span class="text-xs font-bold text-sky-900">Análisis Detallado y Gráfica del Producto Seleccionado</span>
+              </div>
+              <button type="button" onclick="quitarFocoProducto()" class="text-xs text-sky-700 hover:text-sky-900 font-semibold underline">
+                Ver todos los productos
+              </button>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div class="p-4 bg-slate-50 border border-slate-200 rounded-xl">
+                <span class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Producto y Ubicación</span>
+                <p id="stat-producto-nombre" class="font-bold text-slate-900 text-sm mt-1 truncate">-</p>
+                <p id="stat-ubicacion" class="text-xs text-slate-500 mt-0.5 truncate">-</p>
+              </div>
+
+              <div class="p-4 bg-slate-50 border border-slate-200 rounded-xl">
+                <span class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Promedio Antes</span>
+                <p id="stat-prom-antes" class="font-bold text-slate-700 text-2xl mt-1">0.0 uds/sem</p>
+                <span class="text-[11px] text-slate-500">Histórico de referencia</span>
+              </div>
+
+              <div class="p-4 bg-sky-50 border border-sky-200 rounded-xl">
+                <span class="text-[11px] font-bold text-sky-700 uppercase tracking-wider">Promedio Con Multiimplantación</span>
+                <p id="stat-prom-despues" class="font-bold text-sky-900 text-2xl mt-1">0.0 uds/sem</p>
+                <span class="text-[11px] text-sky-600 font-medium">Durante exhibición</span>
+              </div>
+
+              <div class="p-4 bg-slate-50 border border-slate-200 rounded-xl flex flex-col justify-between">
+                <span class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Variación Estimada</span>
+                <p id="stat-variacion" class="text-2xl font-black text-emerald-600 mt-1">0.0%</p>
+                <span class="text-[11px] text-slate-500">Diferencia relativa</span>
+              </div>
+            </div>
+
+            <!-- Veredicto del Sistema (CU05) -->
+            <div id="stat-veredicto" class="p-4 rounded-xl text-sm"></div>
+
+            <!-- Gráfica de Comparación de Semanas -->
+            <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+              <div class="flex items-center justify-between mb-4">
+                <h4 class="text-sm font-bold text-slate-800">Evolución de Ventas Semanales</h4>
+                <div class="flex flex-wrap items-center gap-3 text-xs">
+                  <div class="flex items-center gap-1.5">
+                    <span class="w-3 h-3 bg-slate-400 rounded-sm"></span>
+                    <span class="text-slate-600">Semanas Previas (Sin Multi)</span>
+                  </div>
+                  <div class="flex items-center gap-1.5">
+                    <span class="w-3 h-3 bg-[#0082c3] rounded-sm"></span>
+                    <span class="text-sky-900 font-semibold">Con Multiimplantación (Activa)</span>
+                  </div>
+                  <div class="flex items-center gap-1.5">
+                    <span class="w-3 h-3 bg-amber-500 rounded-sm"></span>
+                    <span class="text-amber-800 font-medium">Semanas Posteriores (Pausada/Fin)</span>
+                  </div>
+                </div>
+              </div>
+              <div class="h-64">
+                <canvas id="chart-ventas-comparacion"></canvas>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===================================================================== -->
+      <!-- SECCIÓN RF02: CATÁLOGO DE PRODUCTOS (ADMIN)                           -->
+      <!-- ===================================================================== -->
+      <section id="section-productos" class="hidden grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div class="lg:col-span-1 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+          <h2 class="text-lg font-bold text-slate-900 mb-1">Nuevo Producto</h2>
+          <p class="text-xs text-slate-500 mb-5">Agregar artículo a la base de datos Decathlon.</p>
+          <form id="form-producto" onsubmit="handleCrearProducto(event)" class="space-y-4">
+            <div>
+              <label class="block text-xs font-bold text-slate-700 mb-1">Nombre Comercial *</label>
+              <input id="prod-nombre" type="text" required placeholder="Ej. Mochila Senderismo 20L Quechua" 
+                class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-sky-500 focus:outline-none" />
+            </div>
+            <div>
+              <label class="block text-xs font-bold text-slate-700 mb-1">Referencia Decathlon *</label>
+              <input id="prod-referencia" type="text" required placeholder="DEC-8492019" 
+                class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-sky-500 focus:outline-none" />
+            </div>
+            <div>
+              <label class="block text-xs font-bold text-slate-700 mb-1">Categoría / Deporte *</label>
+              <select id="prod-categoria" required 
+                class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-sky-500 focus:outline-none capitalize font-medium">
+                <!-- Se llena dinámicamente con las categorías -->
+              </select>
+            </div>
+            <button type="submit" class="w-full py-2.5 bg-[#0082c3] hover:bg-[#006699] text-white font-bold rounded-lg text-sm shadow transition">
+              Guardar Producto
+            </button>
+          </form>
+
+          <!-- GESTIÓN DE CATEGORÍAS (ADMINISTRADOR) -->
+          <div class="mt-6 pt-5 border-t border-slate-200">
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-xs font-bold text-slate-800">Categorías Disponibles</span>
+              <span id="badge-admin-only-cat" class="text-[10px] text-purple-700 bg-purple-50 px-2 py-0.5 rounded font-bold">Admin: Gestionar</span>
+            </div>
+            
+            <!-- Input para añadir nueva categoría (Solo Admin) -->
+            <div id="admin-add-cat-box" class="flex gap-2 mb-3">
+              <input id="nueva-categoria-nombre" type="text" placeholder="Ej. natación, ciclismo..." 
+                class="flex-1 px-3 py-1.5 bg-slate-50 border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-sky-500 focus:outline-none" />
+              <button type="button" onclick="handleCrearCategoria()" 
+                class="px-3 py-1.5 bg-sky-700 hover:bg-sky-800 text-white rounded-lg text-xs font-bold transition flex items-center gap-1">
+                <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+                <span>Añadir</span>
+              </button>
+            </div>
+
+            <!-- Chips de categorías con botón de eliminar para el Admin -->
+            <div id="lista-categorias-chips" class="flex flex-wrap gap-1.5">
+              <!-- Se inyectan dinámicamente -->
+            </div>
+          </div>
+        </div>
+
+        <div class="lg:col-span-2 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+          <h3 class="text-base font-bold text-slate-900 mb-4">Catálogo de Productos</h3>
+          <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs">
+              <thead>
+                <tr class="bg-slate-50 border-b border-slate-200 font-bold text-slate-500 uppercase">
+                  <th class="px-5 py-2.5">Producto</th>
+                  <th class="px-5 py-2.5">Referencia</th>
+                  <th class="px-5 py-2.5">Categoría</th>
+                  <th class="px-5 py-2.5 text-right">Acción</th>
+                </tr>
+              </thead>
+              <tbody id="tabla-productos-body" class="divide-y divide-slate-100"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===================================================================== -->
+      <!-- SECCIÓN RF10: GESTIÓN DE USUARIOS (ROL EXCLUSIVO ADMINISTRADOR)       -->
+      <!-- ===================================================================== -->
+      <section id="section-usuarios" class="hidden grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div class="lg:col-span-1 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+          <div class="flex items-center gap-2 mb-1">
+            <span class="p-1.5 rounded-lg bg-purple-100 text-purple-700">
+              <i data-lucide="shield" class="w-4 h-4"></i>
+            </span>
+            <h2 class="text-lg font-bold text-slate-900">Registrar Usuario</h2>
+          </div>
+          <p class="text-xs text-slate-500 mb-5">Crea colaboradores directamente en la tabla usuario de Supabase.</p>
+          
+          <form id="form-usuario" onsubmit="handleCrearUsuario(event)" class="space-y-4">
+            <div>
+              <label class="block text-xs font-bold text-slate-700 mb-1">Nombre de Usuario *</label>
+              <input id="user-nombre" type="text" required placeholder="Ej. carlos_gomez" 
+                class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-sky-500 focus:outline-none" />
+            </div>
+            <div>
+              <label class="block text-xs font-bold text-slate-700 mb-1">Contraseña *</label>
+              <input id="user-pass" type="password" required placeholder="••••••••" 
+                class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-sky-500 focus:outline-none" />
+            </div>
+            <div>
+              <label class="block text-xs font-bold text-slate-700 mb-1">Rol en el Sistema *</label>
+              <select id="user-rol" required class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-sky-500 focus:outline-none font-medium">
+                <option value="Asesor comercial">Asesor comercial (Registros y consulta)</option>
+                <option value="Responsable de tienda">Responsable de tienda (Evaluación e indicadores)</option>
+                <option value="Administrador">Administrador (Control total del sistema)</option>
+              </select>
+            </div>
+            <button type="submit" class="w-full py-2.5 bg-purple-700 hover:bg-purple-800 text-white font-bold rounded-lg text-sm shadow transition flex items-center justify-center gap-2">
+              <i data-lucide="user-plus" class="w-4 h-4"></i>
+              <span>Crear Usuario en Supabase</span>
+            </button>
+          </form>
+        </div>
+
+        <div class="lg:col-span-2 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+          <div class="flex items-center justify-between pb-3 mb-4 border-b border-slate-100">
+            <div>
+              <h3 class="text-base font-bold text-slate-900">Usuarios Registrados en Supabase</h3>
+              <p class="text-xs text-slate-500">Colaboradores con acceso al sistema y sus roles asignados.</p>
+            </div>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs">
+              <thead>
+                <tr class="bg-slate-50 border-b border-slate-200 font-bold text-slate-500 uppercase">
+                  <th class="px-5 py-2.5">Nombre</th>
+                  <th class="px-5 py-2.5">Rol Asignado</th>
+                  <th class="px-5 py-2.5">Contraseña</th>
+                  <th class="px-5 py-2.5 text-right">Acción</th>
+                </tr>
+              </thead>
+              <tbody id="tabla-usuarios-body" class="divide-y divide-slate-100"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- MODALES DE GESTIÓN Y EDICIÓN                                              -->
+  <!-- ========================================================================= -->
+
+  <!-- 1. MODAL: EDITAR MULTIIMPLANTACIÓN -->
+  <div id="modal-editar-multi" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
+    <div class="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 animate-fade-in my-8">
+      <div class="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
+        <div class="flex items-center gap-2">
+          <span class="p-1.5 rounded-lg bg-sky-100 text-sky-700">
+            <i data-lucide="edit-3" class="w-4 h-4"></i>
+          </span>
+          <h3 class="text-base font-bold text-slate-900">Editar Multiimplantación</h3>
+        </div>
+        <button type="button" onclick="cerrarModal('modal-editar-multi')" class="text-slate-400 hover:text-slate-700 p-1 rounded-lg">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <form id="form-editar-multi" onsubmit="guardarEditarMulti(event)" class="space-y-4">
+        <input type="hidden" id="edit-multi-id" />
+
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">Ubicación en Tienda *</label>
+          <input id="edit-multi-ubicacion" type="text" required 
+            class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-sm focus:bg-white focus:ring-2 focus:ring-sky-500 focus:outline-none font-medium" />
+        </div>
+
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">Fecha de Inicio *</label>
+          <input id="edit-multi-fecha-inicio" type="date" required 
+            class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-sm focus:bg-white focus:ring-2 focus:ring-sky-500 focus:outline-none" />
+        </div>
+
+        <!-- Lista de productos asociados en esta multiimplantación -->
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1.5">Productos Vinculados en esta Exhibición</label>
+          <div id="edit-multi-productos-lista" class="max-h-44 overflow-y-auto space-y-1.5 border border-slate-200 rounded-xl p-2.5 bg-slate-50 text-xs">
+            <!-- Inyectado dinámicamente -->
+          </div>
+          <p class="text-[11px] text-slate-400 mt-1">Puedes finalizar o reactivar productos individualmente sin perder las ventas asociadas.</p>
+        </div>
+
+        <div class="pt-3 border-t border-slate-100 flex items-center justify-end gap-2">
+          <button type="button" onclick="cerrarModal('modal-editar-multi')" class="px-4 py-2 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100 transition">
+            Cancelar
+          </button>
+          <button type="submit" class="px-4 py-2 rounded-lg text-xs font-bold bg-[#0082c3] hover:bg-[#006699] text-white shadow transition flex items-center gap-1.5">
+            <i data-lucide="check" class="w-3.5 h-3.5"></i>
+            <span>Guardar Cambios</span>
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 2. MODAL: CONFIRMAR ELIMINACIÓN O DESACTIVACIÓN DE MULTIIMPLANTACIÓN -->
+  <div id="modal-confirmar-eliminar-multi" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 animate-fade-in">
+      <div class="flex items-center gap-3 text-amber-600 mb-3">
+        <div class="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center flex-shrink-0">
+          <i data-lucide="alert-triangle" class="w-5 h-5 text-amber-600"></i>
+        </div>
+        <div>
+          <h3 class="text-base font-bold text-slate-900">¿Eliminar esta multiimplantación?</h3>
+          <p class="text-xs text-slate-500">Ubicación: <span id="del-multi-ubicacion-text" class="font-bold text-slate-800"></span></p>
+        </div>
+      </div>
+
+      <input type="hidden" id="del-multi-id" />
+
+      <div id="del-multi-info-box" class="p-3.5 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 mb-5 space-y-1">
+        <p class="font-semibold">Control de Integridad Histórica:</p>
+        <p class="text-[11px] text-amber-800">
+          Esta multiimplantación tiene productos vinculados. Recomendamos <strong>Desactivar/Finalizar</strong> para conservar la trazabilidad y las métricas de ventas.
+        </p>
+      </div>
+
+      <div class="mb-4">
+        <label class="block text-xs font-bold text-slate-700 mb-1">Fecha de Finalización *</label>
+        <input id="del-multi-fecha-fin" type="date" 
+          class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs focus:bg-white focus:ring-2 focus:ring-sky-500 focus:outline-none" />
+        <p class="text-[10px] text-slate-400 mt-1">Permite precisar la semana exacta de corte para el análisis comparativo.</p>
+      </div>
+
+      <div class="space-y-2">
+        <button type="button" onclick="ejecutarDesactivarMulti()" 
+          class="w-full py-2.5 px-3 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-lg text-xs shadow transition flex items-center justify-center gap-1.5">
+          <i data-lucide="power" class="w-4 h-4"></i>
+          <span>Desactivar / Finalizar (Recomendado, conserva historial)</span>
+        </button>
+
+        <button type="button" onclick="ejecutarEliminarFisicoMulti()" 
+          class="w-full py-2.5 px-3 bg-red-50 hover:bg-red-100 text-red-700 font-semibold rounded-lg text-xs border border-red-200 transition flex items-center justify-center gap-1.5">
+          <i data-lucide="trash-2" class="w-4 h-4"></i>
+          <span>Eliminar Definitivamente de la Base de Datos</span>
+        </button>
+
+        <button type="button" onclick="cerrarModal('modal-confirmar-eliminar-multi')" 
+          class="w-full py-2 text-slate-500 hover:text-slate-800 text-xs font-semibold">
+          Cancelar
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3. MODAL: EDITAR VENTA SEMANAL -->
+  <div id="modal-editar-venta" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 animate-fade-in">
+      <div class="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
+        <div class="flex items-center gap-2">
+          <span class="p-1.5 rounded-lg bg-sky-100 text-sky-700">
+            <i data-lucide="edit" class="w-4 h-4"></i>
+          </span>
+          <h3 class="text-base font-bold text-slate-900">Editar Registro de Ventas</h3>
+        </div>
+        <button type="button" onclick="cerrarModal('modal-editar-venta')" class="text-slate-400 hover:text-slate-700 p-1 rounded-lg">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <form id="form-editar-venta" onsubmit="guardarEditarVenta(event)" class="space-y-4">
+        <input type="hidden" id="edit-venta-id" />
+
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">Producto *</label>
+          <select id="edit-venta-producto" required 
+            class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs focus:bg-white focus:ring-2 focus:ring-sky-500 focus:outline-none font-medium">
+            <!-- Se llena dinámicamente -->
+          </select>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">Semana (1-53) *</label>
+            <input id="edit-venta-semana" type="number" min="1" max="53" required 
+              class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-sm focus:bg-white focus:ring-2 focus:ring-sky-500 focus:outline-none" />
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">Año *</label>
+            <input id="edit-venta-anio" type="number" min="2020" max="2035" required 
+              class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-sm focus:bg-white focus:ring-2 focus:ring-sky-500 focus:outline-none" />
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">Unidades Vendidas *</label>
+          <input id="edit-venta-unidades" type="number" min="0" required 
+            class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-sm focus:bg-white focus:ring-2 focus:ring-sky-500 focus:outline-none font-bold text-sky-800" />
+        </div>
+
+        <div class="pt-3 border-t border-slate-100 flex items-center justify-end gap-2">
+          <button type="button" onclick="cerrarModal('modal-editar-venta')" class="px-4 py-2 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100 transition">
+            Cancelar
+          </button>
+          <button type="submit" class="px-4 py-2 rounded-lg text-xs font-bold bg-[#0082c3] hover:bg-[#006699] text-white shadow transition flex items-center gap-1.5">
+            <i data-lucide="check" class="w-3.5 h-3.5"></i>
+            <span>Actualizar Venta</span>
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 4. MODAL: EDITAR USUARIO (CON TOGGLE DE MOSTRAR CONTRASEÑA) -->
+  <div id="modal-editar-usuario" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 animate-fade-in">
+      <div class="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
+        <div class="flex items-center gap-2">
+          <span class="p-1.5 rounded-lg bg-purple-100 text-purple-700">
+            <i data-lucide="user-check" class="w-4 h-4"></i>
+          </span>
+          <h3 class="text-base font-bold text-slate-900">Editar Usuario</h3>
+        </div>
+        <button type="button" onclick="cerrarModal('modal-editar-usuario')" class="text-slate-400 hover:text-slate-700 p-1 rounded-lg">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <form id="form-editar-usuario" onsubmit="guardarEditarUsuario(event)" class="space-y-4">
+        <input type="hidden" id="edit-user-id" />
+
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">Nombre de Usuario *</label>
+          <input id="edit-user-nombre" type="text" required 
+            class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-sm focus:bg-white focus:ring-2 focus:ring-sky-500 focus:outline-none" />
+        </div>
+
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">Contraseña</label>
+          <div class="relative">
+            <input id="edit-user-pass" type="password" placeholder="Escribe nueva contraseña..." 
+              class="w-full pl-3 pr-10 py-2 bg-slate-50 border border-slate-300 rounded-lg text-sm focus:bg-white focus:ring-2 focus:ring-sky-500 focus:outline-none" />
+            <button type="button" onclick="toggleVerPassword('edit-user-pass', this)" 
+              class="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-700 transition" title="Mostrar/ocultar contraseña">
+              <i data-lucide="eye" class="w-4 h-4"></i>
+            </button>
+          </div>
+          <p class="text-[10px] text-slate-400 mt-1">Dejar en blanco si deseas conservar la contraseña actual.</p>
+        </div>
+
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">Rol en el Sistema *</label>
+          <select id="edit-user-rol" required 
+            class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-sm focus:bg-white focus:ring-2 focus:ring-sky-500 focus:outline-none font-medium">
+            <option value="Asesor comercial">Asesor comercial</option>
+            <option value="Responsable de tienda">Responsable de tienda</option>
+            <option value="Administrador">Administrador</option>
+          </select>
+        </div>
+
+        <div class="pt-3 border-t border-slate-100 flex items-center justify-end gap-2">
+          <button type="button" onclick="cerrarModal('modal-editar-usuario')" class="px-4 py-2 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100 transition">
+            Cancelar
+          </button>
+          <button type="submit" class="px-4 py-2 rounded-lg text-xs font-bold bg-purple-700 hover:bg-purple-800 text-white shadow transition flex items-center gap-1.5">
+            <i data-lucide="check" class="w-3.5 h-3.5"></i>
+            <span>Actualizar Usuario</span>
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Inicialización de Iconos y Script de la Aplicación -->
+  <script src="app.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      if (window.lucide) {
+        lucide.createIcons();
+      }
+    });
+  </script>
+</body>
+</html>

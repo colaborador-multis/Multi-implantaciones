@@ -1,0 +1,85 @@
+/* Estilos globales inspirados en la identidad visual de Decathlon */
+:root {
+  --decathlon-blue: #0082c3;
+  --decathlon-blue-dark: #006699;
+  --decathlon-navy: #001489;
+  --decathlon-gray-bg: #f8fafc;
+  --decathlon-card: #ffffff;
+  --decathlon-border: #e2e8f0;
+  --decathlon-text: #0f172a;
+  --decathlon-text-muted: #64748b;
+  --decathlon-success: #10b981;
+  --decathlon-warning: #f59e0b;
+  --decathlon-danger: #ef4444;
+}
+
+body {
+  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  background-color: var(--decathlon-gray-bg);
+  color: var(--decathlon-text);
+  min-height: 100vh;
+  margin: 0;
+  padding: 0;
+}
+
+/* Transiciones suaves */
+.transition-smooth {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Badges de rol */
+.badge-asesor {
+  background-color: #e0f2fe;
+  color: #0369a1;
+  border: 1px solid #bae6fd;
+}
+
+.badge-responsable {
+  background-color: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fde68a;
+}
+
+.badge-admin {
+  background-color: #f3e8ff;
+  color: #6b21a8;
+  border: 1px solid #e9d5ff;
+}
+
+/* Tarjetas */
+.card-sport {
+  background: white;
+  border-radius: 12px;
+  border: 1px solid var(--decathlon-border);
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px 0 rgba(0, 0, 0, 0.03);
+}
+
+.card-sport:hover {
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.08), 0 2px 4px -1px rgba(0, 0, 0, 0.04);
+}
+
+/* Scrollbar estilizada */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Animación de entrada suave */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.25s ease-out forwards;
+}
