@@ -83,3 +83,42 @@ body {
 .animate-fade-in {
   animation: fadeIn 0.25s ease-out forwards;
 }
+
+/* Soporte de Impresión Oficial Decathlon para Reporte Top */
+@media print {
+  body * {
+    visibility: hidden !important;
+  }
+  #modal-top-report,
+  #modal-top-report * {
+    visibility: visible !important;
+  }
+  #modal-top-report {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    height: auto !important;
+    background: white !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    z-index: 99999 !important;
+  }
+  #modal-top-report > div {
+    max-width: 100% !important;
+    width: 100% !important;
+    box-shadow: none !important;
+    border: none !important;
+    border-radius: 0 !important;
+  }
+  #modal-top-report .border-b {
+    display: none !important; /* Ocultar barra superior de botones en la hoja impresa */
+  }
+  #top-report-document {
+    padding: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+}

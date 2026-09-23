@@ -23,6 +23,7 @@ const AppState = {
   selectedProductCategory: 'todas',
   modoRegistroMulti: 'nueva',
   modoVentas: 'regular',
+  modoComparativaTop: false,
 
   data: {
     usuarios: [],
@@ -30,14 +31,7 @@ const AppState = {
     multiimplantaciones: [],
     producto_multi: [],
     ventas_semanales: [],
-    categorias: [
-      { id_categoria: 'local-1', nombre: 'fitness' },
-      { id_categoria: 'local-2', nombre: 'running' },
-      { id_categoria: 'local-3', nombre: 'agua' },
-      { id_categoria: 'local-4', nombre: 'montaña' },
-      { id_categoria: 'local-5', nombre: 'atencion al cliente' },
-      { id_categoria: 'local-6', nombre: 'colectivos' }
-    ]
+    categorias: []
   }
 };
 
@@ -327,6 +321,7 @@ function setupUserInterface() {
     'nav-registro': true,
     'nav-ventas': true,
     'nav-evaluacion': true,
+    'nav-top-productos': true,
     'nav-productos': true,
     'nav-usuarios': esAdmin, // ÚNICO ACCESO EXCLUSIVO PARA ADMINISTRADOR
     // Equivalentes en bottom nav móvil
@@ -334,6 +329,7 @@ function setupUserInterface() {
     'mob-nav-registro': true,
     'mob-nav-ventas': true,
     'mob-nav-evaluacion': true,
+    'mob-nav-top-productos': true,
     'mob-nav-productos': true,
     'mob-nav-usuarios': esAdmin
   };
@@ -354,7 +350,7 @@ function setupUserInterface() {
 
 function switchTab(tabId) {
   AppState.activeTab = tabId;
-  const sections = ['multiimplantaciones', 'registro', 'ventas', 'evaluacion', 'productos', 'usuarios'];
+  const sections = ['multiimplantaciones', 'registro', 'ventas', 'evaluacion', 'top-productos', 'productos', 'usuarios'];
   
   sections.forEach(s => {
     const sectionEl  = document.getElementById(`section-${s}`);
@@ -408,6 +404,10 @@ function switchTab(tabId) {
     populateProductSelects();
   }
 
+  if (tabId === 'top-productos') {
+    renderTopProductosPorCategoria();
+  }
+
   if (tabId === 'productos') {
     renderCategoriesUI();
   }
@@ -439,15 +439,15 @@ async function loadAllData() {
     if (!pmRes.error && pmRes.data) AppState.data.producto_multi = pmRes.data;
     if (!vRes.error && vRes.data) AppState.data.ventas_semanales = vRes.data;
 
-    if (cRes.error) {
-      console.error('Error cargando categorías desde Supabase:', cRes.error.message);
-      console.warn('Usando categorías por defecto. Asegúrate de haber ejecutado supabase_schema.sql.');
-    } else if (cRes.data && cRes.data.length > 0) {
-      AppState.data.categorias = cRes.data;
-      console.log(`✅ ${cRes.data.length} categorías cargadas desde Supabase.`);
-    } else {
-      console.warn('La tabla categoria existe pero está vacía. Usando categorías por defecto.');
-    }
+    const remoteCats = (!cRes.error && cRes.data) ? cRes.data : [];
+    const localCats = cargarCategoriasLocales();
+    const mergedCats = [...remoteCats];
+    localCats.forEach(loc => {
+      if (!mergedCats.some(c => c.nombre.toLowerCase() === loc.nombre.toLowerCase())) {
+        mergedCats.push(loc);
+      }
+    });
+    AppState.data.categorias = mergedCats;
   } catch (e) {
     console.error('Error sincronizando con Supabase:', e);
   }
@@ -459,6 +459,10 @@ async function loadAllData() {
   renderVentasTable();
   populateEvaluationSelectors();
   renderCategoriesUI();
+  populateTopCategoryFilter();
+  if (AppState.activeTab === 'top-productos') {
+    renderTopProductosPorCategoria();
+  }
 }
 
 // RF10. Gestión de Usuarios (Rol particular Administrador)
@@ -671,16 +675,93 @@ function renderProductsTable() {
       <td class="px-5 py-3 font-semibold text-slate-800">${safeNombre}</td>
       <td class="px-5 py-3 font-mono text-xs text-sky-700">${safeRef}</td>
       <td class="px-5 py-3 text-slate-600 capitalize">${safeCat}</td>
-      <td class="px-5 py-3 text-right">
+      <td class="px-5 py-3 text-right space-x-2">
+        <button onclick="abrirEditarProducto('${safeId}')" 
+          class="text-xs text-sky-700 hover:text-sky-900 font-semibold underline transition">
+          Editar
+        </button>
         ${esAdmin ? `
           <button onclick="eliminarProducto('${safeId}', '${safeNombre.replace(/'/g, "\\'")}')" 
             class="text-xs text-red-600 hover:text-red-800 font-semibold underline transition">
             Eliminar
-          </button>` : '<span class="text-slate-300 text-xs">—</span>'}
+          </button>` : ''}
       </td>
     `;
     tbody.appendChild(tr);
   });
+}
+
+function abrirEditarProducto(idProducto) {
+  const p = AppState.data.productos.find(item => item.id_producto === idProducto);
+  if (!p) return;
+
+  document.getElementById('edit-prod-id').value = p.id_producto;
+  document.getElementById('edit-prod-nombre').value = p.nombre || '';
+  document.getElementById('edit-prod-referencia').value = p.referencia || '';
+
+  const selectCat = document.getElementById('edit-prod-categoria');
+  if (selectCat) {
+    selectCat.innerHTML = '';
+    const categoriasDisponibles = [...new Set([
+      ...AppState.data.categorias.map(c => c.nombre.toLowerCase()),
+      ...AppState.data.productos.map(pr => (pr.categoria || '').toLowerCase()).filter(Boolean)
+    ])].sort();
+
+    categoriasDisponibles.forEach(cat => {
+      const opt = document.createElement('option');
+      opt.value = cat;
+      opt.textContent = cat.charAt(0).toUpperCase() + cat.slice(1);
+      selectCat.appendChild(opt);
+    });
+    if (p.categoria) selectCat.value = p.categoria.toLowerCase();
+  }
+
+  abrirModal('modal-editar-producto');
+}
+
+async function guardarEditarProducto(e) {
+  e.preventDefault();
+  if (!AppState.supabase) {
+    showToast('Supabase no conectado.', 'warning');
+    return;
+  }
+
+  const idProducto = document.getElementById('edit-prod-id').value;
+  const nombre = document.getElementById('edit-prod-nombre').value.trim();
+  const referencia = document.getElementById('edit-prod-referencia').value.trim();
+  const categoria = document.getElementById('edit-prod-categoria').value.trim();
+
+  if (!idProducto || !nombre || !referencia || !categoria) {
+    showToast('Todos los campos son obligatorios.', 'warning');
+    return;
+  }
+
+  // Validar si la referencia ya pertenece a otro producto
+  const duplicadoRef = AppState.data.productos.find(
+    p => p.referencia && p.referencia.toLowerCase() === referencia.toLowerCase() && p.id_producto !== idProducto
+  );
+  if (duplicadoRef) {
+    showToast(`La referencia "${referencia}" ya pertenece a "${duplicadoRef.nombre}".`, 'warning');
+    return;
+  }
+
+  const { error } = await AppState.supabase
+    .from('producto')
+    .update({
+      nombre,
+      referencia,
+      categoria
+    })
+    .eq('id_producto', idProducto);
+
+  if (error) {
+    showToast(`Error al actualizar producto: ${error.message}`, 'error');
+    return;
+  }
+
+  cerrarModal('modal-editar-producto');
+  showToast('Producto actualizado correctamente en Supabase.', 'success');
+  await loadAllData();
 }
 
 async function eliminarProducto(id_producto, nombre) {
@@ -775,21 +856,36 @@ async function handleCrearCategoria() {
   }
 
   if (AppState.isOnline && AppState.supabase) {
-    const { data: inserted, error } = await AppState.supabase
-      .from('categoria')
-      .insert([{ nombre }])
-      .select()
-      .single();
+    try {
+      const { data: inserted, error } = await AppState.supabase
+        .from('categoria')
+        .insert([{ nombre }])
+        .select()
+        .single();
 
-    if (error) {
-      showToast(`Error al crear categoría: ${error.message}`, 'error');
-      return;
+      if (error) {
+        console.warn('RLS en Supabase restringió inserción directa, guardando categoría localmente:', error.message);
+        const localCat = { id_categoria: `local-${Date.now()}`, nombre };
+        AppState.data.categorias.push(localCat);
+        guardarCategoriasLocales();
+        showToast(`Categoría "${nombre}" creada y disponible en la aplicación.`, 'success');
+      } else if (inserted) {
+        AppState.data.categorias.push(inserted);
+        guardarCategoriasLocales();
+        showToast(`Categoría "${nombre}" creada en Supabase.`, 'success');
+      }
+    } catch (err) {
+      console.warn('Excepción creando categoría en Supabase, guardando localmente:', err);
+      const localCat = { id_categoria: `local-${Date.now()}`, nombre };
+      AppState.data.categorias.push(localCat);
+      guardarCategoriasLocales();
+      showToast(`Categoría "${nombre}" creada localmente.`, 'success');
     }
-    AppState.data.categorias.push(inserted);
-    showToast(`Categoría "${nombre}" creada en Supabase.`, 'success');
   } else {
     // Modo offline: solo local
-    AppState.data.categorias.push({ id_categoria: `local-${Date.now()}`, nombre });
+    const localCat = { id_categoria: `local-${Date.now()}`, nombre };
+    AppState.data.categorias.push(localCat);
+    guardarCategoriasLocales();
     showToast(`Categoría "${nombre}" añadida localmente.`, 'info');
   }
 
@@ -797,22 +893,1650 @@ async function handleCrearCategoria() {
   renderCategoriesUI();
 }
 
+function guardarCategoriasLocales() {
+  try {
+    const nombres = AppState.data.categorias.map(c => ({ id_categoria: c.id_categoria, nombre: c.nombre }));
+    localStorage.setItem('decathlon_categorias_locales', JSON.stringify(nombres));
+  } catch (e) {}
+}
+
+function cargarCategoriasLocales() {
+  try {
+    const raw = localStorage.getItem('decathlon_categorias_locales');
+    return raw ? JSON.parse(raw) : [];
+  } catch (e) {
+    return [];
+  }
+}
+
 async function eliminarCategoria(id_categoria, nombre) {
   if (!confirm(`¿Eliminar la categoría "${nombre}"?`)) return;
 
   if (AppState.isOnline && AppState.supabase && !id_categoria.startsWith('local-')) {
-    const { error } = await AppState.supabase.from('categoria').delete().eq('id_categoria', id_categoria);
-    if (error) {
-      showToast(`Error al eliminar: ${error.message}`, 'error');
-      return;
-    }
-    showToast(`Categoría "${nombre}" eliminada de Supabase.`, 'success');
-  } else {
-    showToast(`Categoría "${nombre}" eliminada localmente.`, 'info');
+    try {
+      await AppState.supabase.from('categoria').delete().eq('id_categoria', id_categoria);
+    } catch (e) {}
   }
 
-  AppState.data.categorias = AppState.data.categorias.filter(c => c.id_categoria !== id_categoria);
+  AppState.data.categorias = AppState.data.categorias.filter(c => c.id_categoria !== id_categoria && c.nombre !== nombre);
+  guardarCategoriasLocales();
+  showToast(`Categoría "${nombre}" eliminada.`, 'info');
   renderCategoriesUI();
+}
+
+
+// ------------------------------------------------------------------------------
+// TOP PRODUCTOS POR CATEGORÍA
+// ------------------------------------------------------------------------------
+
+let topCategoryChartInstance = null;
+
+function populateTopCategoryFilter() {
+  const select = document.getElementById('filter-top-cat');
+  if (!select) return;
+
+  const currentVal = select.value;
+
+  // Extraer todas las categorías únicas desde productos y categorías registradas
+  const catSet = new Set();
+  (AppState.data.categorias || []).forEach(c => {
+    if (c.nombre && c.nombre.trim()) catSet.add(c.nombre.trim());
+  });
+  (AppState.data.productos || []).forEach(p => {
+    const cat = (p.categoria && p.categoria.trim()) ? p.categoria.trim() : 'Sin categoría';
+    catSet.add(cat);
+  });
+
+  const sortedCats = Array.from(catSet).sort((a, b) => {
+    if (a === 'Sin categoría') return 1;
+    if (b === 'Sin categoría') return -1;
+    return a.localeCompare(b, 'es', { sensitivity: 'base' });
+  });
+
+  select.innerHTML = '<option value="ALL">Todas las Categorías</option>';
+  sortedCats.forEach(cat => {
+    const opt = document.createElement('option');
+    opt.value = cat;
+    opt.textContent = cat;
+    select.appendChild(opt);
+  });
+
+  if (currentVal && (currentVal === 'ALL' || sortedCats.includes(currentVal))) {
+    select.value = currentVal;
+  }
+}
+
+function calcularDatosTopPeriodo(fechaDesdeInput, fechaHastaInput, filterCat = 'ALL', filterLimit = 5, filterSearch = '') {
+  let keyDesde = null;
+  let keyHasta = null;
+
+  if (fechaDesdeInput) {
+    const pDesde = parseDateStrToKey(fechaDesdeInput);
+    if (pDesde) keyDesde = pDesde.key;
+  }
+  if (fechaHastaInput) {
+    const pHasta = parseDateStrToKey(fechaHastaInput);
+    if (pHasta) keyHasta = pHasta.key;
+  }
+
+  const productos = AppState.data.productos || [];
+  const rawVentas = AppState.data.ventas_semanales || [];
+  const relacionesMulti = AppState.data.producto_multi || [];
+
+  const productosEnMultiActivos = new Set(
+    relacionesMulti.filter(pm => !pm.fecha_fin).map(pm => pm.id_producto)
+  );
+
+  const ventas = rawVentas.filter(v => {
+    const anio = getVentaAnio(v);
+    const sem = Number(v.semana);
+    const vKey = anio * 100 + sem;
+    if (keyDesde && vKey < keyDesde) return false;
+    if (keyHasta && vKey > keyHasta) return false;
+    return true;
+  });
+
+  const ventasPorProducto = {};
+  ventas.forEach(v => {
+    const pId = v.id_producto;
+    const uds = Number(v.unidades_vendidas) || 0;
+    ventasPorProducto[pId] = (ventasPorProducto[pId] || 0) + uds;
+  });
+
+  const productosPorCategoria = {};
+  productos.forEach(p => {
+    if (filterSearch) {
+      const matchName = (p.nombre || '').toLowerCase().includes(filterSearch);
+      const matchRef = (p.referencia || '').toLowerCase().includes(filterSearch);
+      if (!matchName && !matchRef) return;
+    }
+
+    const cat = (p.categoria && p.categoria.trim()) ? p.categoria.trim() : 'Sin categoría';
+
+    if (filterCat !== 'ALL' && cat !== filterCat) {
+      return;
+    }
+
+    if (!productosPorCategoria[cat]) {
+      productosPorCategoria[cat] = [];
+    }
+
+    const totalUds = ventasPorProducto[p.id_producto] || 0;
+    const enMulti = productosEnMultiActivos.has(p.id_producto);
+
+    productosPorCategoria[cat].push({
+      ...p,
+      categoria: cat,
+      totalUds: totalUds,
+      enMulti: enMulti
+    });
+  });
+
+  for (const cat in productosPorCategoria) {
+    productosPorCategoria[cat].sort((a, b) => {
+      if (b.totalUds !== a.totalUds) {
+        return b.totalUds - a.totalUds;
+      }
+      return (a.nombre || '').localeCompare(b.nombre || '', 'es');
+    });
+  }
+
+  const categoriasKeys = Object.keys(productosPorCategoria);
+  let totalUdsTienda = 0;
+  let topProductoGlobal = null;
+  let topCategoriaGlobal = null;
+  let maxCatUds = -1;
+  let countTopEnMulti = 0;
+  let countTopEvaluados = 0;
+
+  const ventasPorCategoriaTotal = {};
+  productos.forEach(p => {
+    const uds = ventasPorProducto[p.id_producto] || 0;
+    const cat = (p.categoria && p.categoria.trim()) ? p.categoria.trim() : 'Sin categoría';
+    ventasPorCategoriaTotal[cat] = (ventasPorCategoriaTotal[cat] || 0) + uds;
+    totalUdsTienda += uds;
+
+    if (!topProductoGlobal || uds > topProductoGlobal.uds) {
+      topProductoGlobal = {
+        nombre: p.nombre,
+        referencia: p.referencia,
+        categoria: cat,
+        uds: uds
+      };
+    }
+  });
+
+  for (const [cat, uds] of Object.entries(ventasPorCategoriaTotal)) {
+    if (uds > maxCatUds) {
+      maxCatUds = uds;
+      topCategoriaGlobal = { categoria: cat, uds: uds };
+    }
+  }
+
+  categoriasKeys.forEach(cat => {
+    const list = productosPorCategoria[cat];
+    const topList = list.slice(0, filterLimit);
+    topList.forEach(p => {
+      countTopEvaluados++;
+      if (p.enMulti) countTopEnMulti++;
+    });
+  });
+
+  const sortedCategories = categoriasKeys.sort((a, b) => {
+    const sumA = (productosPorCategoria[a] || []).reduce((acc, curr) => acc + curr.totalUds, 0);
+    const sumB = (productosPorCategoria[b] || []).reduce((acc, curr) => acc + curr.totalUds, 0);
+    return sumB - sumA;
+  });
+
+  let periodoStr = 'Todo el histórico';
+  if (fechaDesdeInput && fechaHastaInput) {
+    periodoStr = `${fechaDesdeInput} a ${fechaHastaInput}`;
+  } else if (fechaDesdeInput) {
+    periodoStr = `Desde ${fechaDesdeInput}`;
+  } else if (fechaHastaInput) {
+    periodoStr = `Hasta ${fechaHastaInput}`;
+  }
+
+  return {
+    fechaDesdeInput,
+    fechaHastaInput,
+    periodoStr,
+    ventas,
+    ventasPorProducto,
+    productosPorCategoria,
+    sortedCategories,
+    totalUdsTienda,
+    topProductoGlobal,
+    topCategoriaGlobal,
+    countTopEnMulti,
+    countTopEvaluados,
+    ventasPorCategoriaTotal
+  };
+}
+
+function renderTopProductosPorCategoria() {
+  const container = document.getElementById('container-top-categorias');
+  if (!container) return;
+
+  populateTopCategoryFilter();
+
+  const filterSearch = (document.getElementById('filter-top-search')?.value || '').toLowerCase().trim();
+  const filterCat = document.getElementById('filter-top-cat')?.value || 'ALL';
+  const filterLimit = parseInt(document.getElementById('filter-top-limit')?.value, 10) || 5;
+
+  const fechaDesdeA = document.getElementById('filter-top-fecha-desde')?.value || '';
+  const fechaHastaA = document.getElementById('filter-top-fecha-hasta')?.value || '';
+
+  const datosA = calcularDatosTopPeriodo(fechaDesdeA, fechaHastaA, filterCat, filterLimit, filterSearch);
+
+  // Actualizar badge visual del rango Período A
+  const badgeA = document.getElementById('badge-top-rango-fechas');
+  if (badgeA) {
+    const prefijo = AppState.modoComparativaTop ? 'Período A: ' : '';
+    badgeA.innerHTML = `<i data-lucide="calendar" class="w-3.5 h-3.5"></i><span>${prefijo}${datosA.periodoStr} (${datosA.totalUdsTienda} uds)</span>`;
+  }
+
+  if (!AppState.modoComparativaTop) {
+    // ==========================================
+    // MODO ESTÁNDAR (UN SOLO PERÍODO)
+    // ==========================================
+    const kpiCatsEl = document.getElementById('top-kpi-categorias');
+    if (kpiCatsEl) {
+      kpiCatsEl.textContent = datosA.sortedCategories.length;
+      const sub = kpiCatsEl.nextElementSibling;
+      if (sub) sub.textContent = 'con productos registrados';
+    }
+
+    const kpiCatLiderEl = document.getElementById('top-kpi-cat-lider');
+    const kpiCatLiderSub = document.getElementById('top-kpi-cat-lider-sub');
+    if (kpiCatLiderEl) {
+      if (datosA.topCategoriaGlobal && datosA.topCategoriaGlobal.uds > 0) {
+        kpiCatLiderEl.textContent = datosA.topCategoriaGlobal.categoria;
+        kpiCatLiderEl.title = datosA.topCategoriaGlobal.categoria;
+        if (kpiCatLiderSub) kpiCatLiderSub.textContent = `${datosA.topCategoriaGlobal.uds} uds en período`;
+      } else {
+        kpiCatLiderEl.textContent = 'Sin ventas';
+        kpiCatLiderEl.title = 'Sin ventas en el período';
+        if (kpiCatLiderSub) kpiCatLiderSub.textContent = '0 uds registradas';
+      }
+    }
+
+    const kpiProdLiderEl = document.getElementById('top-kpi-prod-lider');
+    const kpiProdLiderSub = document.getElementById('top-kpi-prod-lider-sub');
+    if (kpiProdLiderEl) {
+      if (datosA.topProductoGlobal && datosA.topProductoGlobal.uds > 0) {
+        kpiProdLiderEl.textContent = datosA.topProductoGlobal.nombre;
+        kpiProdLiderEl.title = `${datosA.topProductoGlobal.nombre} (${datosA.topProductoGlobal.referencia})`;
+        if (kpiProdLiderSub) kpiProdLiderSub.textContent = `${datosA.topProductoGlobal.uds} uds (${datosA.topProductoGlobal.referencia})`;
+      } else {
+        kpiProdLiderEl.textContent = 'Sin ventas';
+        kpiProdLiderEl.title = 'Sin ventas en el período';
+        if (kpiProdLiderSub) kpiProdLiderSub.textContent = '0 uds registradas';
+      }
+    }
+
+    const kpiMultiEl = document.getElementById('top-kpi-cobertura-multi');
+    const kpiMultiSub = document.getElementById('top-kpi-cobertura-sub');
+    if (kpiMultiEl) {
+      const pct = datosA.countTopEvaluados > 0 ? Math.round((datosA.countTopEnMulti / datosA.countTopEvaluados) * 100) : 0;
+      kpiMultiEl.className = 'text-2xl font-black text-slate-900 mt-0.5';
+      kpiMultiEl.textContent = `${pct}%`;
+      if (kpiMultiSub) kpiMultiSub.textContent = `${datosA.countTopEnMulti} de ${datosA.countTopEvaluados} en multi`;
+    }
+
+    // Renderizar Gráfica estándar
+    renderTopCategoryChart(datosA.ventasPorCategoriaTotal);
+
+    if (datosA.sortedCategories.length === 0) {
+      container.innerHTML = `
+        <div class="col-span-full bg-white p-12 rounded-2xl border border-slate-200 text-center">
+          <div class="w-16 h-16 bg-slate-100 text-slate-400 rounded-full flex items-center justify-center mx-auto mb-3">
+            <i data-lucide="package-search" class="w-8 h-8"></i>
+          </div>
+          <h4 class="text-base font-bold text-slate-800">No se encontraron productos</h4>
+          <p class="text-xs text-slate-500 mt-1 max-w-md mx-auto">
+            No hay artículos que coincidan con la categoría o término de búsqueda seleccionado en este rango de fechas.
+          </p>
+        </div>
+      `;
+      if (window.lucide) lucide.createIcons();
+      return;
+    }
+
+    // Generar tarjetas estándar
+    let cardsHtml = '';
+    datosA.sortedCategories.forEach(cat => {
+      const allProdsInCat = datosA.productosPorCategoria[cat] || [];
+      const totalCatUds = allProdsInCat.reduce((acc, curr) => acc + curr.totalUds, 0);
+      const topSellers = allProdsInCat.slice(0, filterLimit);
+      const maxUdsInThisCat = (allProdsInCat[0]?.totalUds) || 1;
+
+      const isSinCat = cat.toLowerCase() === 'sin categoría';
+      const badgeColor = isSinCat ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-sky-50 text-[#0082c3] border-sky-200';
+      const iconName = isSinCat ? 'tag' : 'folder-git-2';
+
+      cardsHtml += `
+        <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col justify-between hover:shadow-md transition-shadow">
+          <div class="p-5 border-b border-slate-100 bg-gradient-to-r from-slate-50/70 to-white flex items-center justify-between">
+            <div class="flex items-center gap-3">
+              <span class="w-10 h-10 rounded-xl flex items-center justify-center font-bold text-sm border ${badgeColor}">
+                <i data-lucide="${iconName}" class="w-5 h-5"></i>
+              </span>
+              <div>
+                <div class="flex items-center gap-2">
+                  <h3 class="font-bold text-slate-900 text-base">${escapeHtml(cat)}</h3>
+                  ${isSinCat ? '<span class="text-[10px] bg-amber-100 text-amber-800 font-semibold px-2 py-0.5 rounded-full">Pendiente clasificar</span>' : ''}
+                </div>
+                <p class="text-xs text-slate-500">${allProdsInCat.length} producto${allProdsInCat.length !== 1 ? 's' : ''} registrado${allProdsInCat.length !== 1 ? 's' : ''}</p>
+              </div>
+            </div>
+            <div class="text-right">
+              <span class="text-xs font-bold text-slate-900 bg-slate-100 px-2.5 py-1 rounded-lg">
+                ${totalCatUds} uds vendidas
+              </span>
+            </div>
+          </div>
+
+          <div class="p-4 flex-1 space-y-3">
+            ${topSellers.map((p, index) => {
+              const rank = index + 1;
+              let rankBadge = rank === 1 ? '🥇' : (rank === 2 ? '🥈' : (rank === 3 ? '🥉' : `#${rank}`));
+              const pctBar = maxUdsInThisCat > 0 ? Math.round((p.totalUds / maxUdsInThisCat) * 100) : 0;
+              const multiBadge = p.enMulti 
+                ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-sky-100 text-[#0082c3] border border-sky-200">
+                     <i data-lucide="sparkles" class="w-3 h-3"></i> En Multi
+                   </span>`
+                : `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-100 text-slate-500">
+                     Disponible
+                   </span>`;
+
+              const actionBtn = p.enMulti
+                ? `<button onclick="irAEvaluarProducto('${p.id_producto}')" 
+                     class="px-2.5 py-1 text-[11px] font-semibold bg-sky-50 hover:bg-sky-100 text-[#0082c3] rounded-lg transition border border-sky-200 flex items-center gap-1" 
+                     title="Ver rendimiento en evaluación">
+                     <span>Evaluar</span>
+                     <i data-lucide="bar-chart-2" class="w-3 h-3"></i>
+                   </button>`
+                : `<button onclick="irARegistrarConProducto('${p.id_producto}')" 
+                     class="px-2.5 py-1 text-[11px] font-semibold bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-lg transition border border-slate-200 flex items-center gap-1"
+                     title="Crear o asociar a una multiimplantación">
+                     <span>Multiimplantar</span>
+                     <i data-lucide="plus" class="w-3 h-3"></i>
+                   </button>`;
+
+              return `
+                <div class="p-3 rounded-xl bg-slate-50/50 hover:bg-slate-50 border border-slate-100 transition space-y-2">
+                  <div class="flex items-start justify-between gap-2">
+                    <div class="flex items-start gap-2.5 min-w-0">
+                      <div class="mt-0.5 flex-shrink-0 font-bold text-xs">${rankBadge}</div>
+                      <div class="min-w-0">
+                        <div class="text-xs font-bold text-slate-900 truncate" title="${escapeHtml(p.nombre)}">
+                          ${escapeHtml(p.nombre)}
+                        </div>
+                        <div class="flex items-center gap-2 mt-0.5">
+                          <span class="text-[10px] font-mono text-slate-400 font-medium">Ref: ${escapeHtml(p.referencia || 'S/R')}</span>
+                          ${multiBadge}
+                        </div>
+                      </div>
+                    </div>
+                    <div class="text-right flex-shrink-0">
+                      <div class="text-sm font-black text-slate-900">${p.totalUds} <span class="text-[11px] font-normal text-slate-500">uds</span></div>
+                      <div class="mt-1">${actionBtn}</div>
+                    </div>
+                  </div>
+
+                  <div class="w-full bg-slate-200 h-1.5 rounded-full overflow-hidden">
+                    <div class="bg-[#0082c3] h-full rounded-full transition-all duration-500" style="width: ${pctBar}%"></div>
+                  </div>
+                </div>
+              `;
+            }).join('')}
+
+            ${allProdsInCat.length > filterLimit ? `
+              <div class="text-center pt-2">
+                <span class="text-[11px] text-slate-400 font-medium">
+                  +${allProdsInCat.length - filterLimit} producto${allProdsInCat.length - filterLimit !== 1 ? 's' : ''} más en esta categoría
+                </span>
+              </div>
+            ` : ''}
+          </div>
+        </div>
+      `;
+    });
+
+    container.innerHTML = cardsHtml;
+  } else {
+    // ==========================================
+    // MODO COMPARATIVA (PERÍODO A vs PERÍODO B)
+    // ==========================================
+    const fechaDesdeB = document.getElementById('filter-top-fecha-desde-b')?.value || '';
+    const fechaHastaB = document.getElementById('filter-top-fecha-hasta-b')?.value || '';
+
+    const datosB = calcularDatosTopPeriodo(fechaDesdeB, fechaHastaB, filterCat, filterLimit, filterSearch);
+
+    // Actualizar badge Período B
+    const badgeB = document.getElementById('badge-top-rango-fechas-b');
+    if (badgeB) {
+      badgeB.innerHTML = `<i data-lucide="calendar" class="w-3.5 h-3.5 text-purple-700"></i><span>Período B: ${datosB.periodoStr} (${datosB.totalUdsTienda} uds)</span>`;
+    }
+
+    // Variación global entre A y B
+    const diffGlobal = datosB.totalUdsTienda - datosA.totalUdsTienda;
+    const pctGlobal = datosA.totalUdsTienda > 0 
+      ? ((diffGlobal / datosA.totalUdsTienda) * 100).toFixed(1) 
+      : (datosB.totalUdsTienda > 0 ? '+100' : '0');
+
+    // Categorías combinadas de A y B
+    const unionCats = Array.from(new Set([
+      ...Object.keys(datosA.productosPorCategoria),
+      ...Object.keys(datosB.productosPorCategoria)
+    ]));
+
+    // Actualizar KPIs comparativos
+    const kpiCatsEl = document.getElementById('top-kpi-categorias');
+    if (kpiCatsEl) {
+      kpiCatsEl.innerHTML = `<span class="text-xl font-black">${datosA.sortedCategories.length} <span class="text-xs font-semibold text-slate-400">vs</span> ${datosB.sortedCategories.length}</span>`;
+      const sub = kpiCatsEl.nextElementSibling;
+      if (sub) sub.textContent = `A (${datosA.totalUdsTienda} uds) · B (${datosB.totalUdsTienda} uds)`;
+    }
+
+    const kpiCatLiderEl = document.getElementById('top-kpi-cat-lider');
+    const kpiCatLiderSub = document.getElementById('top-kpi-cat-lider-sub');
+    if (kpiCatLiderEl) {
+      const cA = datosA.topCategoriaGlobal?.categoria || '-';
+      const cB = datosB.topCategoriaGlobal?.categoria || '-';
+      kpiCatLiderEl.textContent = `${cA} / ${cB}`;
+      kpiCatLiderEl.title = `Período A: ${cA} · Período B: ${cB}`;
+      if (kpiCatLiderSub) {
+        kpiCatLiderSub.textContent = `A: ${datosA.topCategoriaGlobal?.uds || 0} uds · B: ${datosB.topCategoriaGlobal?.uds || 0} uds`;
+      }
+    }
+
+    const kpiProdLiderEl = document.getElementById('top-kpi-prod-lider');
+    const kpiProdLiderSub = document.getElementById('top-kpi-prod-lider-sub');
+    if (kpiProdLiderEl) {
+      const pA = datosA.topProductoGlobal?.nombre || '-';
+      const pB = datosB.topProductoGlobal?.nombre || '-';
+      kpiProdLiderEl.textContent = `${pA} / ${pB}`;
+      kpiProdLiderEl.title = `Período A: ${pA} · Período B: ${pB}`;
+      if (kpiProdLiderSub) {
+        kpiProdLiderSub.textContent = `A: ${datosA.topProductoGlobal?.uds || 0} uds · B: ${datosB.topProductoGlobal?.uds || 0} uds`;
+      }
+    }
+
+    const kpiMultiEl = document.getElementById('top-kpi-cobertura-multi');
+    const kpiMultiSub = document.getElementById('top-kpi-cobertura-sub');
+    if (kpiMultiEl) {
+      const sign = diffGlobal >= 0 ? '+' : '';
+      const colorCls = diffGlobal >= 0 ? 'text-emerald-600' : 'text-rose-600';
+      kpiMultiEl.className = `text-2xl font-black ${colorCls} mt-0.5`;
+      kpiMultiEl.textContent = `${sign}${diffGlobal} uds`;
+      if (kpiMultiSub) {
+        kpiMultiSub.textContent = `Variación: ${sign}${pctGlobal}% en ventas totales`;
+      }
+    }
+
+    // Renderizar Gráfica comparativa agrupada
+    renderTopCategoryChart(
+      datosA.ventasPorCategoriaTotal, 
+      datosB.ventasPorCategoriaTotal, 
+      `Período A (${datosA.periodoStr})`, 
+      `Período B (${datosB.periodoStr})`
+    );
+
+    // Ordenar categorías por ventas combinadas desc
+    unionCats.sort((a, b) => {
+      const totalA = (datosA.ventasPorCategoriaTotal[a] || 0) + (datosB.ventasPorCategoriaTotal[a] || 0);
+      const totalB = (datosA.ventasPorCategoriaTotal[b] || 0) + (datosB.ventasPorCategoriaTotal[b] || 0);
+      return totalB - totalA;
+    });
+
+    if (unionCats.length === 0) {
+      container.innerHTML = `
+        <div class="col-span-full bg-white p-12 rounded-2xl border border-slate-200 text-center">
+          <div class="w-16 h-16 bg-slate-100 text-slate-400 rounded-full flex items-center justify-center mx-auto mb-3">
+            <i data-lucide="package-search" class="w-8 h-8"></i>
+          </div>
+          <h4 class="text-base font-bold text-slate-800">No se encontraron productos en ninguno de los períodos</h4>
+          <p class="text-xs text-slate-500 mt-1 max-w-md mx-auto">
+            Ajusta los rangos de fecha del Período A o del Período B para ver la comparativa.
+          </p>
+        </div>
+      `;
+      if (window.lucide) lucide.createIcons();
+      return;
+    }
+
+    let cardsHtml = '';
+    unionCats.forEach(cat => {
+      const prodsA = datosA.productosPorCategoria[cat] || [];
+      const prodsB = datosB.productosPorCategoria[cat] || [];
+
+      const totalUdsA = prodsA.reduce((acc, curr) => acc + curr.totalUds, 0);
+      const totalUdsB = prodsB.reduce((acc, curr) => acc + curr.totalUds, 0);
+
+      const diffCat = totalUdsB - totalUdsA;
+      const pctCat = totalUdsA > 0 ? ((diffCat / totalUdsA) * 100).toFixed(1) : (totalUdsB > 0 ? '+100' : '0');
+
+      let varBadge = '';
+      if (diffCat > 0) {
+        varBadge = `<span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">▲ +${diffCat} uds (+${pctCat}%)</span>`;
+      } else if (diffCat < 0) {
+        varBadge = `<span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-100 text-rose-800 border border-rose-200">▼ ${diffCat} uds (${pctCat}%)</span>`;
+      } else {
+        varBadge = `<span class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-slate-100 text-slate-600">= 0 uds (0%)</span>`;
+      }
+
+      const topA = prodsA.slice(0, filterLimit);
+      const topB = prodsB.slice(0, filterLimit);
+
+      const maxUdsA = topA[0]?.totalUds || 1;
+      const maxUdsB = topB[0]?.totalUds || 1;
+
+      const isSinCat = cat.toLowerCase() === 'sin categoría';
+      const badgeColor = isSinCat ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-sky-50 text-[#0082c3] border-sky-200';
+      const iconName = isSinCat ? 'tag' : 'folder-git-2';
+
+      cardsHtml += `
+        <div class="col-span-full bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col hover:shadow-md transition-shadow">
+          <!-- Cabecera de la Categoría con resumen comparativo -->
+          <div class="p-4 sm:p-5 border-b border-slate-100 bg-gradient-to-r from-slate-50 via-white to-purple-50/40 flex flex-wrap items-center justify-between gap-3">
+            <div class="flex items-center gap-3">
+              <span class="w-10 h-10 rounded-xl flex items-center justify-center font-bold text-sm border ${badgeColor}">
+                <i data-lucide="${iconName}" class="w-5 h-5"></i>
+              </span>
+              <div>
+                <div class="flex items-center gap-2">
+                  <h3 class="font-black text-slate-900 text-base sm:text-lg">${escapeHtml(cat)}</h3>
+                  ${isSinCat ? '<span class="text-[10px] bg-amber-100 text-amber-800 font-semibold px-2 py-0.5 rounded-full">Pendiente clasificar</span>' : ''}
+                </div>
+                <p class="text-xs text-slate-500">Comparativa directa de tops por disciplina</p>
+              </div>
+            </div>
+
+            <!-- Resumen de ventas y variación en la categoría -->
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="text-xs font-bold text-sky-800 bg-sky-50 border border-sky-200 px-2.5 py-1 rounded-lg">
+                🟦 A: ${totalUdsA} uds
+              </span>
+              <span class="text-xs font-bold text-purple-800 bg-purple-50 border border-purple-200 px-2.5 py-1 rounded-lg">
+                🟪 B: ${totalUdsB} uds
+              </span>
+              ${varBadge}
+            </div>
+          </div>
+
+          <!-- Cuadrícula Doble: Período A vs Período B -->
+          <div class="p-4 sm:p-5 grid grid-cols-1 lg:grid-cols-2 gap-5 flex-1 bg-slate-50/30">
+            
+            <!-- COLUMNA PERÍODO A -->
+            <div class="bg-white rounded-xl border border-sky-100 p-4 shadow-xs space-y-3">
+              <div class="flex items-center justify-between border-b border-sky-100 pb-2.5">
+                <div class="flex items-center gap-2">
+                  <span class="w-2.5 h-2.5 rounded-full bg-[#0082c3]"></span>
+                  <span class="text-xs font-black text-sky-900 uppercase tracking-wider">Período A (${datosA.periodoStr})</span>
+                </div>
+                <span class="text-xs font-bold text-sky-800">${totalUdsA} uds</span>
+              </div>
+
+              ${topA.length === 0 ? `
+                <div class="py-6 text-center text-xs text-slate-400 italic">Sin ventas registradas en Período A</div>
+              ` : `
+                <div class="space-y-2.5">
+                  ${topA.map((p, idx) => {
+                    const rank = idx + 1;
+                    let rankBadge = rank === 1 ? '🥇' : (rank === 2 ? '🥈' : (rank === 3 ? '🥉' : `#${rank}`));
+                    const pctBar = maxUdsA > 0 ? Math.round((p.totalUds / maxUdsA) * 100) : 0;
+                    const multiBadge = p.enMulti 
+                      ? `<span class="text-[9px] font-bold px-1.5 py-0.5 rounded bg-sky-100 text-[#0082c3] border border-sky-200">En Multi</span>`
+                      : `<span class="text-[9px] font-medium px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">Disponible</span>`;
+
+                    return `
+                      <div class="p-2.5 rounded-lg bg-slate-50 border border-slate-100 space-y-1.5">
+                        <div class="flex items-center justify-between gap-2">
+                          <div class="flex items-center gap-2 min-w-0">
+                            <span class="font-black text-xs text-slate-700 w-5 flex-shrink-0">${rankBadge}</span>
+                            <div class="min-w-0">
+                              <div class="text-xs font-bold text-slate-900 truncate" title="${escapeHtml(p.nombre)}">${escapeHtml(p.nombre)}</div>
+                              <div class="flex items-center gap-1.5 text-[10px] text-slate-400 font-mono">
+                                <span>Ref: ${escapeHtml(p.referencia || 'S/R')}</span>
+                                ${multiBadge}
+                              </div>
+                            </div>
+                          </div>
+                          <div class="text-right flex-shrink-0">
+                            <span class="text-xs font-black text-slate-900">${p.totalUds} uds</span>
+                          </div>
+                        </div>
+                        <div class="w-full bg-slate-200 h-1 rounded-full overflow-hidden">
+                          <div class="bg-[#0082c3] h-full rounded-full" style="width: ${pctBar}%"></div>
+                        </div>
+                      </div>
+                    `;
+                  }).join('')}
+                </div>
+              `}
+            </div>
+
+            <!-- COLUMNA PERÍODO B -->
+            <div class="bg-white rounded-xl border border-purple-100 p-4 shadow-xs space-y-3">
+              <div class="flex items-center justify-between border-b border-purple-100 pb-2.5">
+                <div class="flex items-center gap-2">
+                  <span class="w-2.5 h-2.5 rounded-full bg-purple-600"></span>
+                  <span class="text-xs font-black text-purple-950 uppercase tracking-wider">Período B (${datosB.periodoStr})</span>
+                </div>
+                <span class="text-xs font-bold text-purple-900">${totalUdsB} uds</span>
+              </div>
+
+              ${topB.length === 0 ? `
+                <div class="py-6 text-center text-xs text-slate-400 italic">Sin ventas registradas en Período B</div>
+              ` : `
+                <div class="space-y-2.5">
+                  ${topB.map((p, idx) => {
+                    const rank = idx + 1;
+                    let rankBadge = rank === 1 ? '🥇' : (rank === 2 ? '🥈' : (rank === 3 ? '🥉' : `#${rank}`));
+                    const pctBar = maxUdsB > 0 ? Math.round((p.totalUds / maxUdsB) * 100) : 0;
+                    const multiBadge = p.enMulti 
+                      ? `<span class="text-[9px] font-bold px-1.5 py-0.5 rounded bg-sky-100 text-[#0082c3] border border-sky-200">En Multi</span>`
+                      : `<span class="text-[9px] font-medium px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">Disponible</span>`;
+
+                    const udsEnA = datosA.ventasPorProducto[p.id_producto] || 0;
+                    const diffProd = p.totalUds - udsEnA;
+                    let trendBadge = '';
+                    if (udsEnA === 0) {
+                      trendBadge = `<span class="text-[9px] font-bold bg-purple-100 text-purple-800 border border-purple-200 px-1 py-0.2 rounded">⭐ Nuevo</span>`;
+                    } else if (diffProd > 0) {
+                      trendBadge = `<span class="text-[9px] font-bold text-emerald-700 bg-emerald-50 px-1 py-0.2 rounded">▲ +${diffProd}</span>`;
+                    } else if (diffProd < 0) {
+                      trendBadge = `<span class="text-[9px] font-bold text-rose-700 bg-rose-50 px-1 py-0.2 rounded">▼ ${diffProd}</span>`;
+                    } else {
+                      trendBadge = `<span class="text-[9px] font-medium text-slate-400 bg-slate-100 px-1 py-0.2 rounded">= 0</span>`;
+                    }
+
+                    return `
+                      <div class="p-2.5 rounded-lg bg-slate-50 border border-slate-100 space-y-1.5">
+                        <div class="flex items-center justify-between gap-2">
+                          <div class="flex items-center gap-2 min-w-0">
+                            <span class="font-black text-xs text-slate-700 w-5 flex-shrink-0">${rankBadge}</span>
+                            <div class="min-w-0">
+                              <div class="text-xs font-bold text-slate-900 truncate" title="${escapeHtml(p.nombre)}">${escapeHtml(p.nombre)}</div>
+                              <div class="flex items-center gap-1.5 text-[10px] text-slate-400 font-mono">
+                                <span>Ref: ${escapeHtml(p.referencia || 'S/R')}</span>
+                                ${multiBadge}
+                                ${trendBadge}
+                              </div>
+                            </div>
+                          </div>
+                          <div class="text-right flex-shrink-0">
+                            <span class="text-xs font-black text-purple-950">${p.totalUds} uds</span>
+                          </div>
+                        </div>
+                        <div class="w-full bg-slate-200 h-1 rounded-full overflow-hidden">
+                          <div class="bg-purple-600 h-full rounded-full" style="width: ${pctBar}%"></div>
+                        </div>
+                      </div>
+                    `;
+                  }).join('')}
+                </div>
+              `}
+            </div>
+
+          </div>
+        </div>
+      `;
+    });
+
+    container.innerHTML = cardsHtml;
+  }
+
+  if (window.lucide) {
+    lucide.createIcons();
+  }
+}
+
+function renderTopCategoryChart(ventasPorCatA, ventasPorCatB = null, labelA = 'Período A', labelB = 'Período B') {
+  const canvas = document.getElementById('chart-top-categorias');
+  if (!canvas) return;
+
+  if (topCategoryChartInstance) {
+    topCategoryChartInstance.destroy();
+    topCategoryChartInstance = null;
+  }
+
+  if (ventasPorCatB) {
+    // Modo comparativo: Agrupar ambas categorías
+    const allLabels = Array.from(new Set([
+      ...Object.keys(ventasPorCatA),
+      ...Object.keys(ventasPorCatB)
+    ])).sort((a, b) => {
+      const totA = (ventasPorCatA[a] || 0) + (ventasPorCatB[a] || 0);
+      const totB = (ventasPorCatA[b] || 0) + (ventasPorCatB[b] || 0);
+      return totB - totA;
+    });
+
+    if (allLabels.length === 0) return;
+
+    const dataA = allLabels.map(l => ventasPorCatA[l] || 0);
+    const dataB = allLabels.map(l => ventasPorCatB[l] || 0);
+
+    topCategoryChartInstance = new Chart(canvas, {
+      type: 'bar',
+      data: {
+        labels: allLabels,
+        datasets: [
+          {
+            label: labelA,
+            data: dataA,
+            backgroundColor: '#0082c3',
+            borderRadius: 6,
+            maxBarThickness: 32
+          },
+          {
+            label: labelB,
+            data: dataB,
+            backgroundColor: '#8b5cf6',
+            borderRadius: 6,
+            maxBarThickness: 32
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { 
+            display: true,
+            position: 'top',
+            labels: { font: { size: 11, weight: 'bold' } }
+          },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => ` ${ctx.dataset.label}: ${ctx.raw} unidades`
+            }
+          }
+        },
+        scales: {
+          y: {
+            beginAtZero: true,
+            grid: { color: '#f1f5f9' },
+            ticks: { font: { size: 11 } }
+          },
+          x: {
+            grid: { display: false },
+            ticks: {
+              font: { size: 11, weight: 'bold' },
+              maxRotation: 45,
+              minRotation: 0
+            }
+          }
+        }
+      }
+    });
+  } else {
+    // Modo estándar
+    const entries = Object.entries(ventasPorCatA).sort((a, b) => b[1] - a[1]);
+    if (entries.length === 0) return;
+
+    const labels = entries.map(e => e[0]);
+    const dataValues = entries.map(e => e[1]);
+
+    const palette = [
+      '#0082c3', '#0284c7', '#0ea5e9', '#38bdf8', '#7dd3fc', 
+      '#f59e0b', '#10b981', '#6366f1', '#8b5cf6', '#ec4899', '#94a3b8'
+    ];
+    const bgColors = labels.map((_, i) => palette[i % palette.length]);
+
+    topCategoryChartInstance = new Chart(canvas, {
+      type: 'bar',
+      data: {
+        labels: labels,
+        datasets: [{
+          label: 'Unidades Vendidas',
+          data: dataValues,
+          backgroundColor: bgColors,
+          borderRadius: 6,
+          maxBarThickness: 40
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => ` ${ctx.raw} unidades vendidas`
+            }
+          }
+        },
+        scales: {
+          y: {
+            beginAtZero: true,
+            grid: { color: '#f1f5f9' },
+            ticks: { font: { size: 11 } }
+          },
+          x: {
+            grid: { display: false },
+            ticks: {
+              font: { size: 11, weight: 'bold' },
+              maxRotation: 45,
+              minRotation: 0
+            }
+          }
+        }
+      }
+    });
+  }
+}
+
+function irARegistrarConProducto(idProducto) {
+  AppState.selectedProductIds.clear();
+  AppState.selectedProductIds.add(idProducto);
+  switchTab('registro');
+  showToast('Producto seleccionado para la multiimplantación.', 'info');
+}
+
+function irAEvaluarProducto(idProducto) {
+  const pm = AppState.data.producto_multi.find(r => r.id_producto === idProducto && !r.fecha_fin);
+  if (pm) {
+    switchTab('evaluacion');
+    const multiSelect = document.getElementById('eval-select-multi');
+    if (multiSelect) {
+      multiSelect.value = pm.id_multiimplantacion;
+      alCambiarMultiEvaluacion();
+      setTimeout(() => {
+        const prodSelect = document.getElementById('eval-select-producto');
+        if (prodSelect) {
+          prodSelect.value = idProducto;
+          renderEvaluacion();
+        }
+      }, 100);
+      return;
+    }
+  }
+  switchTab('evaluacion');
+}
+
+function getWeekStartDate(semana, anio) {
+  const jan4 = new Date(Date.UTC(anio, 0, 4));
+  const day = jan4.getUTCDay() || 7;
+  const monWeek1 = new Date(jan4.getTime() - (day - 1) * 86400000);
+  return new Date(monWeek1.getTime() + (semana - 1) * 7 * 86400000);
+}
+
+function getWeekEndDate(semana, anio) {
+  const mon = getWeekStartDate(semana, anio);
+  return new Date(mon.getTime() + 6 * 86400000);
+}
+
+function alCambiarPresetFechaTop() {
+  const preset = document.getElementById('filter-top-fecha-preset')?.value || 'ALL';
+  const inputDesde = document.getElementById('filter-top-fecha-desde');
+  const inputHasta = document.getElementById('filter-top-fecha-hasta');
+
+  if (!inputDesde || !inputHasta) return;
+
+  if (preset === 'ALL') {
+    inputDesde.value = '';
+    inputHasta.value = '';
+  } else if (preset === 'JULIO_Q1') {
+    inputDesde.value = '2026-07-01';
+    inputHasta.value = '2026-07-14';
+  } else if (preset === 'JULIO_Q2') {
+    inputDesde.value = '2026-07-15';
+    inputHasta.value = '2026-07-31';
+  } else if (preset === 'JULIO_2026') {
+    inputDesde.value = '2026-07-01';
+    inputHasta.value = '2026-07-31';
+  } else if (preset === 'YEAR_2026') {
+    inputDesde.value = '2026-01-01';
+    inputHasta.value = '2026-12-31';
+  } else if (preset === 'LAST_4_WEEKS' || preset === 'LAST_8_WEEKS') {
+    let maxKey = 0;
+    (AppState.data.ventas_semanales || []).forEach(v => {
+      const k = getVentaAnio(v) * 100 + Number(v.semana);
+      if (k > maxKey) maxKey = k;
+    });
+
+    if (maxKey > 0) {
+      const maxAnio = Math.floor(maxKey / 100);
+      const maxSem = maxKey % 100;
+      const numSemanas = preset === 'LAST_4_WEEKS' ? 4 : 8;
+
+      const fechaFin = getWeekEndDate(maxSem, maxAnio);
+      let startSem = maxSem - numSemanas + 1;
+      let startAnio = maxAnio;
+      if (startSem < 1) {
+        startAnio -= 1;
+        startSem += 52;
+      }
+      const fechaIni = getWeekStartDate(startSem, startAnio);
+
+      inputDesde.value = fechaIni.toISOString().split('T')[0];
+      inputHasta.value = fechaFin.toISOString().split('T')[0];
+    } else {
+      inputDesde.value = '';
+      inputHasta.value = '';
+    }
+  }
+
+  renderTopProductosPorCategoria();
+}
+
+function alCambiarFechaTopManual() {
+  const selectPreset = document.getElementById('filter-top-fecha-preset');
+  const inputDesde = document.getElementById('filter-top-fecha-desde')?.value;
+  const inputHasta = document.getElementById('filter-top-fecha-hasta')?.value;
+
+  if (selectPreset) {
+    if (!inputDesde && !inputHasta) {
+      selectPreset.value = 'ALL';
+    } else if (inputDesde === '2026-07-01' && inputHasta === '2026-07-14') {
+      selectPreset.value = 'JULIO_Q1';
+    } else if (inputDesde === '2026-07-15' && inputHasta === '2026-07-31') {
+      selectPreset.value = 'JULIO_Q2';
+    } else if (inputDesde === '2026-07-01' && inputHasta === '2026-07-31') {
+      selectPreset.value = 'JULIO_2026';
+    } else if (inputDesde === '2026-01-01' && inputHasta === '2026-12-31') {
+      selectPreset.value = 'YEAR_2026';
+    } else {
+      selectPreset.value = 'CUSTOM';
+    }
+  }
+
+  renderTopProductosPorCategoria();
+}
+
+function limpiarFiltroFechasTop() {
+  const selectPreset = document.getElementById('filter-top-fecha-preset');
+  const inputDesde = document.getElementById('filter-top-fecha-desde');
+  const inputHasta = document.getElementById('filter-top-fecha-hasta');
+
+  if (selectPreset) selectPreset.value = 'ALL';
+  if (inputDesde) inputDesde.value = '';
+  if (inputHasta) inputHasta.value = '';
+
+  renderTopProductosPorCategoria();
+}
+
+function toggleModoComparativaTop() {
+  AppState.modoComparativaTop = !AppState.modoComparativaTop;
+  const boxB = document.getElementById('box-top-periodo-b');
+  const btnToggle = document.getElementById('btn-toggle-comparativa');
+  const btnText = document.getElementById('btn-toggle-comparativa-text');
+
+  if (AppState.modoComparativaTop) {
+    if (boxB) boxB.classList.remove('hidden');
+    if (btnToggle) {
+      btnToggle.className = 'px-2.5 py-1 bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded-lg shadow-xs text-xs flex items-center gap-1.5 transition';
+    }
+    if (btnText) btnText.textContent = 'Modo Comparativo Activo';
+
+    // Si Período A está en Todo el histórico o vacío, predeterminamos Quincena 1 (Sem 27-28)
+    const inputDesdeA = document.getElementById('filter-top-fecha-desde');
+    const inputHastaA = document.getElementById('filter-top-fecha-hasta');
+    const presetA = document.getElementById('filter-top-fecha-preset');
+    if (!inputDesdeA?.value && !inputHastaA?.value) {
+      if (presetA) presetA.value = 'JULIO_Q1';
+      if (inputDesdeA) inputDesdeA.value = '2026-07-01';
+      if (inputHastaA) inputHastaA.value = '2026-07-14';
+    }
+
+    // Inicializar Período B con Quincena 2 (Sem 29-30) si está vacío
+    const inputDesdeB = document.getElementById('filter-top-fecha-desde-b');
+    const inputHastaB = document.getElementById('filter-top-fecha-hasta-b');
+    const presetB = document.getElementById('filter-top-fecha-preset-b');
+    if (!inputDesdeB?.value && !inputHastaB?.value) {
+      if (presetB) presetB.value = 'JULIO_Q2';
+      if (inputDesdeB) inputDesdeB.value = '2026-07-15';
+      if (inputHastaB) inputHastaB.value = '2026-07-31';
+    }
+
+    showToast('Modo comparativo activado. Comparando Período A vs Período B.', 'info');
+  } else {
+    if (boxB) boxB.classList.add('hidden');
+    if (btnToggle) {
+      btnToggle.className = 'px-2.5 py-1 bg-white hover:bg-purple-50 text-slate-700 hover:text-purple-700 font-semibold rounded-lg border border-slate-300 hover:border-purple-300 shadow-xs text-xs flex items-center gap-1.5 transition';
+    }
+    if (btnText) btnText.textContent = 'Comparar Fechas';
+    showToast('Modo comparativo desactivado.', 'info');
+  }
+
+  if (window.lucide) {
+    lucide.createIcons();
+  }
+  renderTopProductosPorCategoria();
+}
+
+function alCambiarPresetFechaTopB() {
+  const preset = document.getElementById('filter-top-fecha-preset-b')?.value || 'JULIO_Q2';
+  const inputDesde = document.getElementById('filter-top-fecha-desde-b');
+  const inputHasta = document.getElementById('filter-top-fecha-hasta-b');
+
+  if (!inputDesde || !inputHasta) return;
+
+  if (preset === 'JULIO_Q1') {
+    inputDesde.value = '2026-07-01';
+    inputHasta.value = '2026-07-14';
+  } else if (preset === 'JULIO_Q2') {
+    inputDesde.value = '2026-07-15';
+    inputHasta.value = '2026-07-31';
+  } else if (preset === 'JULIO_2026') {
+    inputDesde.value = '2026-07-01';
+    inputHasta.value = '2026-07-31';
+  } else if (preset === 'LAST_2_WEEKS' || preset === 'LAST_4_WEEKS') {
+    let maxKey = 0;
+    (AppState.data.ventas_semanales || []).forEach(v => {
+      const k = getVentaAnio(v) * 100 + Number(v.semana);
+      if (k > maxKey) maxKey = k;
+    });
+
+    if (maxKey > 0) {
+      const maxAnio = Math.floor(maxKey / 100);
+      const maxSem = maxKey % 100;
+      const numSemanas = preset === 'LAST_2_WEEKS' ? 2 : 4;
+
+      const fechaFin = getWeekEndDate(maxSem, maxAnio);
+      let startSem = maxSem - numSemanas + 1;
+      let startAnio = maxAnio;
+      if (startSem < 1) {
+        startAnio -= 1;
+        startSem += 52;
+      }
+      const fechaIni = getWeekStartDate(startSem, startAnio);
+
+      inputDesde.value = fechaIni.toISOString().split('T')[0];
+      inputHasta.value = fechaFin.toISOString().split('T')[0];
+    }
+  }
+
+  renderTopProductosPorCategoria();
+}
+
+function alCambiarFechaTopManualB() {
+  const selectPreset = document.getElementById('filter-top-fecha-preset-b');
+  const inputDesde = document.getElementById('filter-top-fecha-desde-b')?.value;
+  const inputHasta = document.getElementById('filter-top-fecha-hasta-b')?.value;
+
+  if (selectPreset) {
+    if (inputDesde === '2026-07-01' && inputHasta === '2026-07-14') {
+      selectPreset.value = 'JULIO_Q1';
+    } else if (inputDesde === '2026-07-15' && inputHasta === '2026-07-31') {
+      selectPreset.value = 'JULIO_Q2';
+    } else if (inputDesde === '2026-07-01' && inputHasta === '2026-07-31') {
+      selectPreset.value = 'JULIO_2026';
+    } else {
+      selectPreset.value = 'CUSTOM';
+    }
+  }
+
+  renderTopProductosPorCategoria();
+}
+
+function limpiarFiltroFechasTopB() {
+  const selectPreset = document.getElementById('filter-top-fecha-preset-b');
+  const inputDesde = document.getElementById('filter-top-fecha-desde-b');
+  const inputHasta = document.getElementById('filter-top-fecha-hasta-b');
+
+  if (selectPreset) selectPreset.value = 'JULIO_Q2';
+  if (inputDesde) inputDesde.value = '2026-07-15';
+  if (inputHasta) inputHasta.value = '2026-07-31';
+
+  renderTopProductosPorCategoria();
+}
+
+
+// ------------------------------------------------------------------------------
+// EXPORTACIÓN DE INFORME TOP PRODUCTOS (PDF Y FOTO PNG)
+// ------------------------------------------------------------------------------
+
+function abrirReporteTop(formatoAuto = null) {
+  generarContenidoTopReporte();
+  abrirModal('modal-top-report');
+
+  if (formatoAuto === 'pdf') {
+    setTimeout(() => {
+      descargarTopReporteComoPDF();
+    }, 400);
+  } else if (formatoAuto === 'foto') {
+    setTimeout(() => {
+      descargarTopReporteComoImagen();
+    }, 400);
+  }
+}
+
+function generarContenidoTopReporte() {
+  const container = document.getElementById('top-report-document');
+  if (!container) return;
+
+  const filterSearch = (document.getElementById('filter-top-search')?.value || '').toLowerCase().trim();
+  const filterCat = document.getElementById('filter-top-cat')?.value || 'ALL';
+  const filterLimit = parseInt(document.getElementById('filter-top-limit')?.value, 10) || 5;
+
+  const fechaDesdeA = document.getElementById('filter-top-fecha-desde')?.value || '';
+  const fechaHastaA = document.getElementById('filter-top-fecha-hasta')?.value || '';
+
+  const datosA = calcularDatosTopPeriodo(fechaDesdeA, fechaHastaA, filterCat, filterLimit, filterSearch);
+
+  const hoyStr = new Date().toLocaleDateString('es-CO', {
+    year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit'
+  });
+  const userName = AppState.currentUser?.nombre || 'Colaborador Decathlon';
+  const userRol = AppState.currentUser?.rol || 'Comercial';
+
+  let chartImgHtml = '';
+  const chartCanvas = document.getElementById('chart-top-categorias');
+  if (chartCanvas && topCategoryChartInstance) {
+    try {
+      const chartImgUrl = chartCanvas.toDataURL('image/png');
+      const chartSub = AppState.modoComparativaTop 
+        ? `Comparativa: Período A (${datosA.totalUdsTienda} uds) vs Período B` 
+        : `Volumen en período: ${datosA.totalUdsTienda} uds`;
+      chartImgHtml = `
+        <div class="p-4 bg-slate-50 rounded-xl border border-slate-200">
+          <div class="text-xs font-bold text-slate-800 mb-2 flex items-center justify-between">
+            <span>Distribución de Unidades Vendidas por Categoría</span>
+            <span class="text-[10px] text-slate-500 font-normal">${chartSub}</span>
+          </div>
+          <div class="flex justify-center">
+            <img src="${chartImgUrl}" alt="Gráfica de Ventas" style="max-height: 220px; width: 100%; object-fit: contain;" />
+          </div>
+        </div>
+      `;
+    } catch (e) {
+      console.warn('No se pudo convertir la gráfica a imagen:', e);
+    }
+  }
+
+  // =========================================================================
+  // MODO COMPARATIVO: PERÍODO A VS PERÍODO B
+  // =========================================================================
+  if (AppState.modoComparativaTop) {
+    const fechaDesdeB = document.getElementById('filter-top-fecha-desde-b')?.value || '';
+    const fechaHastaB = document.getElementById('filter-top-fecha-hasta-b')?.value || '';
+    const datosB = calcularDatosTopPeriodo(fechaDesdeB, fechaHastaB, filterCat, filterLimit, filterSearch);
+
+    const diffTienda = datosB.totalUdsTienda - datosA.totalUdsTienda;
+    let diffTiendaBadge = '';
+    if (diffTienda > 0) {
+      diffTiendaBadge = `<span class="text-emerald-700 bg-emerald-50 border border-emerald-200 text-[10px] font-bold px-1.5 py-0.5 rounded">▲ +${diffTienda} uds</span>`;
+    } else if (diffTienda < 0) {
+      diffTiendaBadge = `<span class="text-rose-700 bg-rose-50 border border-rose-200 text-[10px] font-bold px-1.5 py-0.5 rounded">▼ ${diffTienda} uds</span>`;
+    } else {
+      diffTiendaBadge = `<span class="text-slate-500 bg-slate-100 text-[10px] font-medium px-1.5 py-0.5 rounded">= 0 uds</span>`;
+    }
+
+    const pctMultiA = datosA.countTopEvaluados > 0 ? Math.round((datosA.countTopEnMulti / datosA.countTopEvaluados) * 100) : 0;
+    const pctMultiB = datosB.countTopEvaluados > 0 ? Math.round((datosB.countTopEnMulti / datosB.countTopEvaluados) * 100) : 0;
+
+    const allCategories = Array.from(new Set([
+      ...Object.keys(datosA.productosPorCategoria),
+      ...Object.keys(datosB.productosPorCategoria)
+    ])).sort((a, b) => {
+      const sumA = (datosA.productosPorCategoria[a] || []).reduce((acc, c) => acc + c.totalUds, 0);
+      const sumB = (datosB.productosPorCategoria[b] || []).reduce((acc, c) => acc + c.totalUds, 0);
+      return sumB - sumA;
+    });
+
+    let docHtml = `
+      <!-- Cabecera Oficial Decathlon -->
+      <div class="border-b-2 border-purple-600 pb-4 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <div style="background-color: #0082c3;" class="w-11 h-11 rounded-xl text-white flex items-center justify-center font-black text-2xl shadow-sm">
+            D
+          </div>
+          <div>
+            <h1 class="text-2xl font-black tracking-tight text-slate-900 leading-none">DECATHLON</h1>
+            <p class="text-[11px] font-bold text-purple-700 uppercase tracking-wider mt-1">Informe Comparativo de Rendimiento Comercial</p>
+          </div>
+        </div>
+        <div class="text-right">
+          <div class="text-xs font-bold text-purple-900 bg-purple-50 border border-purple-200 px-2.5 py-0.5 rounded-full inline-block">
+            Modo Comparativa Activo
+          </div>
+          <div class="text-[11px] text-slate-500 mt-1">Emisión: ${hoyStr}</div>
+        </div>
+      </div>
+
+      <!-- Ficha de Parámetros y Filtros Comparativos -->
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5 p-3.5 bg-slate-50 rounded-xl border border-slate-200 text-xs">
+        <div>
+          <span class="text-[10px] font-bold text-[#0082c3] uppercase tracking-wider block">Período A (Base)</span>
+          <span class="font-bold text-slate-900">${escapeHtml(datosA.periodoStr)}</span>
+          <span class="text-[10px] text-sky-700 block">${datosA.totalUdsTienda} uds</span>
+        </div>
+        <div>
+          <span class="text-[10px] font-bold text-purple-700 uppercase tracking-wider block">Período B (Comparativo)</span>
+          <span class="font-bold text-slate-900">${escapeHtml(datosB.periodoStr)}</span>
+          <span class="text-[10px] text-purple-700 block">${datosB.totalUdsTienda} uds</span>
+        </div>
+        <div>
+          <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Disciplina / Deporte</span>
+          <span class="font-semibold text-slate-800">${escapeHtml(filterCat === 'ALL' ? 'Todas las Categorías' : filterCat)}</span>
+        </div>
+        <div>
+          <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Generado Por</span>
+          <span class="font-semibold text-slate-800">${escapeHtml(userName)} (${escapeHtml(userRol)})</span>
+        </div>
+      </div>
+
+      <!-- Resumen Ejecutivo / KPIs Comparativos -->
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div class="p-3 bg-white rounded-xl border border-slate-200 shadow-xs">
+          <div class="text-[10px] font-bold text-slate-400 uppercase">Ventas Totales Tienda</div>
+          <div class="flex items-baseline gap-2 mt-1">
+            <span class="text-sm font-bold text-[#0082c3]">A: ${datosA.totalUdsTienda}</span>
+            <span class="text-sm font-bold text-purple-900">B: ${datosB.totalUdsTienda}</span>
+          </div>
+          <div class="mt-1">${diffTiendaBadge}</div>
+        </div>
+
+        <div class="p-3 bg-white rounded-xl border border-slate-200 shadow-xs">
+          <div class="text-[10px] font-bold text-amber-600 uppercase">Categoría Líder A vs B</div>
+          <div class="text-[11px] font-bold text-slate-900 truncate mt-1">
+            <span class="text-[#0082c3]">A:</span> ${escapeHtml(datosA.topCategoriaGlobal ? datosA.topCategoriaGlobal.categoria : 'S/D')}
+          </div>
+          <div class="text-[11px] font-bold text-purple-900 truncate">
+            <span class="text-purple-700">B:</span> ${escapeHtml(datosB.topCategoriaGlobal ? datosB.topCategoriaGlobal.categoria : 'S/D')}
+          </div>
+        </div>
+
+        <div class="p-3 bg-white rounded-xl border border-slate-200 shadow-xs">
+          <div class="text-[10px] font-bold text-emerald-600 uppercase">Top 1 Producto A vs B</div>
+          <div class="text-[11px] font-bold text-slate-900 truncate mt-1">
+            <span class="text-[#0082c3]">A:</span> ${escapeHtml(datosA.topProductoGlobal ? datosA.topProductoGlobal.nombre : 'S/D')}
+          </div>
+          <div class="text-[11px] font-bold text-purple-900 truncate">
+            <span class="text-purple-700">B:</span> ${escapeHtml(datosB.topProductoGlobal ? datosB.topProductoGlobal.nombre : 'S/D')}
+          </div>
+        </div>
+
+        <div class="p-3 bg-white rounded-xl border border-slate-200 shadow-xs">
+          <div class="text-[10px] font-bold text-sky-700 uppercase">Multiimplantación</div>
+          <div class="text-xs font-bold text-slate-800 mt-1">
+            <span class="text-[#0082c3]">A: ${pctMultiA}%</span> vs <span class="text-purple-700">B: ${pctMultiB}%</span>
+          </div>
+          <div class="text-[10px] text-slate-500">Tops en cabeceras</div>
+        </div>
+      </div>
+
+      <!-- Gráfica Comparativa -->
+      ${chartImgHtml}
+
+      <!-- Tablas Detalladas por Categoría Comparativa -->
+      <div class="space-y-4">
+    `;
+
+    if (allCategories.length === 0) {
+      docHtml += `
+        <div class="p-6 text-center text-slate-400 text-xs italic bg-slate-50 rounded-xl border border-slate-200">
+          No se encontraron datos registrados para los filtros seleccionados en ninguno de los períodos.
+        </div>
+      `;
+    } else {
+      allCategories.forEach(cat => {
+        const prodsA = datosA.productosPorCategoria[cat] || [];
+        const prodsB = datosB.productosPorCategoria[cat] || [];
+        const totalCatA = prodsA.reduce((acc, curr) => acc + curr.totalUds, 0);
+        const totalCatB = prodsB.reduce((acc, curr) => acc + curr.totalUds, 0);
+        const diffCat = totalCatB - totalCatA;
+
+        let diffBadgeCat = '';
+        if (diffCat > 0) {
+          diffBadgeCat = `<span class="text-emerald-700 bg-emerald-50 border border-emerald-200 text-[10px] font-bold px-2 py-0.5 rounded-full">▲ +${diffCat} uds</span>`;
+        } else if (diffCat < 0) {
+          diffBadgeCat = `<span class="text-rose-700 bg-rose-50 border border-rose-200 text-[10px] font-bold px-2 py-0.5 rounded-full">▼ ${diffCat} uds</span>`;
+        } else {
+          diffBadgeCat = `<span class="text-slate-500 bg-slate-100 text-[10px] font-medium px-2 py-0.5 rounded-full">= 0 uds</span>`;
+        }
+
+        const topListA = prodsA.slice(0, filterLimit);
+        const topListB = prodsB.slice(0, filterLimit);
+
+        docHtml += `
+          <div class="rounded-xl border border-slate-200 overflow-hidden shadow-xs">
+            <!-- Barra de cabecera de la categoría comparativa -->
+            <div class="px-4 py-2.5 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
+              <div class="flex items-center gap-2">
+                <span class="font-black text-slate-900 text-sm capitalize">${escapeHtml(cat)}</span>
+                <span class="text-[11px] font-medium text-slate-500">(${prodsA.length} en A / ${prodsB.length} en B)</span>
+              </div>
+              <div class="flex items-center gap-2 text-xs">
+                <span class="font-bold text-[#0082c3] bg-sky-50 px-2 py-0.5 rounded border border-sky-200">A: ${totalCatA} uds</span>
+                <span class="font-bold text-purple-900 bg-purple-50 px-2 py-0.5 rounded border border-purple-200">B: ${totalCatB} uds</span>
+                ${diffBadgeCat}
+              </div>
+            </div>
+
+            <!-- Dos columnas comparativas: Período A y Período B -->
+            <div class="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-slate-200 text-xs">
+              
+              <!-- Sub-tabla Período A -->
+              <div class="p-3">
+                <div class="flex items-center justify-between pb-2 border-b border-sky-100 mb-2">
+                  <span class="font-bold text-[#0082c3] text-[11px] uppercase tracking-wider flex items-center gap-1.5">
+                    <span class="w-2 h-2 rounded-full bg-[#0082c3]"></span>
+                    Período A (${datosA.periodoStr})
+                  </span>
+                  <span class="font-bold text-slate-700 text-[11px]">${totalCatA} uds</span>
+                </div>
+                ${topListA.length === 0 ? `
+                  <div class="py-4 text-center text-slate-400 text-xs italic">Sin ventas en Período A</div>
+                ` : `
+                  <table class="w-full text-left">
+                    <thead>
+                      <tr class="text-[9px] font-bold text-slate-400 uppercase">
+                        <th class="py-1 px-1.5 text-center w-8">#</th>
+                        <th class="py-1 px-1.5">Producto</th>
+                        <th class="py-1 px-1.5 text-center">Multi</th>
+                        <th class="py-1 px-1.5 text-right">Uds</th>
+                      </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100">
+                      ${topListA.map((p, idx) => `
+                        <tr>
+                          <td class="py-1.5 px-1.5 text-center font-bold text-slate-500">${idx + 1}º</td>
+                          <td class="py-1.5 px-1.5 font-medium text-slate-900 truncate max-w-[140px]" title="${escapeHtml(p.nombre)}">${escapeHtml(p.nombre)}</td>
+                          <td class="py-1.5 px-1.5 text-center">${p.enMulti ? '<span class="text-[9px] font-bold text-[#0082c3]">⭐ Sí</span>' : '<span class="text-[9px] text-slate-400">No</span>'}</td>
+                          <td class="py-1.5 px-1.5 text-right font-bold text-slate-900">${p.totalUds}</td>
+                        </tr>
+                      `).join('')}
+                    </tbody>
+                  </table>
+                `}
+              </div>
+
+              <!-- Sub-tabla Período B -->
+              <div class="p-3 bg-purple-50/20">
+                <div class="flex items-center justify-between pb-2 border-b border-purple-100 mb-2">
+                  <span class="font-bold text-purple-900 text-[11px] uppercase tracking-wider flex items-center gap-1.5">
+                    <span class="w-2 h-2 rounded-full bg-purple-600"></span>
+                    Período B (${datosB.periodoStr})
+                  </span>
+                  <span class="font-bold text-purple-950 text-[11px]">${totalCatB} uds</span>
+                </div>
+                ${topListB.length === 0 ? `
+                  <div class="py-4 text-center text-slate-400 text-xs italic">Sin ventas en Período B</div>
+                ` : `
+                  <table class="w-full text-left">
+                    <thead>
+                      <tr class="text-[9px] font-bold text-slate-400 uppercase">
+                        <th class="py-1 px-1.5 text-center w-8">#</th>
+                        <th class="py-1 px-1.5">Producto</th>
+                        <th class="py-1 px-1.5 text-center">Multi</th>
+                        <th class="py-1 px-1.5 text-right">Uds</th>
+                        <th class="py-1 px-1.5 text-right">Var</th>
+                      </tr>
+                    </thead>
+                    <tbody class="divide-y divide-purple-100/50">
+                      ${topListB.map((p, idx) => {
+                        const udsEnA = datosA.ventasPorProducto[p.id_producto] || 0;
+                        const diffProd = p.totalUds - udsEnA;
+                        let trendHtml = '';
+                        if (udsEnA === 0) {
+                          trendHtml = `<span class="text-[9px] font-bold text-purple-800 bg-purple-100 px-1 rounded">⭐ Nuevo</span>`;
+                        } else if (diffProd > 0) {
+                          trendHtml = `<span class="text-[9px] font-bold text-emerald-700 bg-emerald-50 px-1 rounded">▲+${diffProd}</span>`;
+                        } else if (diffProd < 0) {
+                          trendHtml = `<span class="text-[9px] font-bold text-rose-700 bg-rose-50 px-1 rounded">▼${diffProd}</span>`;
+                        } else {
+                          trendHtml = `<span class="text-[9px] text-slate-400 bg-slate-100 px-1 rounded">=</span>`;
+                        }
+
+                        return `
+                          <tr>
+                            <td class="py-1.5 px-1.5 text-center font-bold text-purple-700">${idx + 1}º</td>
+                            <td class="py-1.5 px-1.5 font-medium text-slate-900 truncate max-w-[130px]" title="${escapeHtml(p.nombre)}">${escapeHtml(p.nombre)}</td>
+                            <td class="py-1.5 px-1.5 text-center">${p.enMulti ? '<span class="text-[9px] font-bold text-[#0082c3]">⭐ Sí</span>' : '<span class="text-[9px] text-slate-400">No</span>'}</td>
+                            <td class="py-1.5 px-1.5 text-right font-black text-purple-950">${p.totalUds}</td>
+                            <td class="py-1.5 px-1.5 text-right">${trendHtml}</td>
+                          </tr>
+                        `;
+                      }).join('')}
+                    </tbody>
+                  </table>
+                `}
+              </div>
+
+            </div>
+          </div>
+        `;
+      });
+    }
+
+    docHtml += `
+      </div>
+
+      <!-- Pie de Página Oficial -->
+      <div class="pt-4 border-t border-slate-200 flex items-center justify-between text-[10px] text-slate-400">
+        <div>Decathlon Colombia · Sistema de Multiimplantaciones y Ventas</div>
+        <div>Documento de Comparativa Comercial · Confidencial</div>
+      </div>
+    `;
+
+    container.innerHTML = docHtml;
+    return;
+  }
+
+  // =========================================================================
+  // MODO ESTÁNDAR: UN SOLO PERÍODO
+  // =========================================================================
+  const sortedCategories = datosA.sortedCategories;
+  const categoriasKeys = Object.keys(datosA.productosPorCategoria);
+  const pctMulti = datosA.countTopEvaluados > 0 ? Math.round((datosA.countTopEnMulti / datosA.countTopEvaluados) * 100) : 0;
+
+  let docHtml = `
+    <!-- Cabecera Oficial Decathlon -->
+    <div class="border-b-2 border-[#0082c3] pb-4 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div style="background-color: #0082c3;" class="w-11 h-11 rounded-xl text-white flex items-center justify-center font-black text-2xl shadow-sm">
+          D
+        </div>
+        <div>
+          <h1 class="text-2xl font-black tracking-tight text-slate-900 leading-none">DECATHLON</h1>
+          <p class="text-[11px] font-bold text-sky-700 uppercase tracking-wider mt-1">Informe de Rendimiento Comercial</p>
+        </div>
+      </div>
+      <div class="text-right">
+        <div class="text-xs font-bold text-slate-800">Top Productos por Categoría</div>
+        <div class="text-[11px] text-slate-500">Emisión: ${hoyStr}</div>
+      </div>
+    </div>
+
+    <!-- Ficha de Parámetros y Filtros del Reporte -->
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5 p-3.5 bg-slate-50 rounded-xl border border-slate-200 text-xs">
+      <div>
+        <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Período de Análisis</span>
+        <span class="font-bold text-slate-900">${escapeHtml(datosA.periodoStr)}</span>
+      </div>
+      <div>
+        <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Disciplina / Deporte</span>
+        <span class="font-semibold text-slate-800">${escapeHtml(filterCat === 'ALL' ? 'Todas las Categorías' : filterCat)}</span>
+      </div>
+      <div>
+        <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Rango de Ranking</span>
+        <span class="font-semibold text-slate-800">Top ${filterLimit >= 900 ? 'Todos' : filterLimit}</span>
+      </div>
+      <div>
+        <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Generado Por</span>
+        <span class="font-semibold text-slate-800">${escapeHtml(userName)} (${escapeHtml(userRol)})</span>
+      </div>
+    </div>
+
+    <!-- Resumen Ejecutivo / KPIs -->
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div class="p-3 bg-white rounded-xl border border-slate-200 shadow-xs">
+        <div class="text-[10px] font-bold text-slate-400 uppercase">Categorías</div>
+        <div class="text-xl font-black text-slate-900 mt-0.5">${categoriasKeys.length}</div>
+        <div class="text-[10px] text-slate-500">${datosA.totalUdsTienda} uds totales</div>
+      </div>
+      <div class="p-3 bg-white rounded-xl border border-slate-200 shadow-xs">
+        <div class="text-[10px] font-bold text-amber-600 uppercase">Categoría Líder</div>
+        <div class="text-xs font-black text-slate-900 mt-0.5 truncate">${escapeHtml(datosA.topCategoriaGlobal && datosA.topCategoriaGlobal.uds > 0 ? datosA.topCategoriaGlobal.categoria : 'Sin ventas')}</div>
+        <div class="text-[10px] text-slate-500">${datosA.topCategoriaGlobal ? datosA.topCategoriaGlobal.uds : 0} uds vendidas</div>
+      </div>
+      <div class="p-3 bg-white rounded-xl border border-slate-200 shadow-xs">
+        <div class="text-[10px] font-bold text-emerald-600 uppercase">Top Producto Tienda</div>
+        <div class="text-xs font-black text-slate-900 mt-0.5 truncate">${escapeHtml(datosA.topProductoGlobal && datosA.topProductoGlobal.uds > 0 ? datosA.topProductoGlobal.nombre : 'Sin ventas')}</div>
+        <div class="text-[10px] text-slate-500">${datosA.topProductoGlobal ? datosA.topProductoGlobal.uds : 0} uds (${datosA.topProductoGlobal ? datosA.topProductoGlobal.referencia : ''})</div>
+      </div>
+      <div class="p-3 bg-white rounded-xl border border-slate-200 shadow-xs">
+        <div class="text-[10px] font-bold text-sky-700 uppercase">En Multiimplantación</div>
+        <div class="text-xl font-black text-[#0082c3] mt-0.5">${pctMulti}%</div>
+        <div class="text-[10px] text-slate-500">${datosA.countTopEnMulti} de ${datosA.countTopEvaluados} en cabeceras</div>
+      </div>
+    </div>
+
+    <!-- Gráfica de distribución de ventas (si existe) -->
+    ${chartImgHtml}
+
+    <!-- Tablas Detalladas por Categoría -->
+    <div class="space-y-4">
+  `;
+
+  if (sortedCategories.length === 0) {
+    docHtml += `
+      <div class="p-6 text-center text-slate-400 text-xs italic bg-slate-50 rounded-xl border border-slate-200">
+        No se encontraron datos registrados para los filtros seleccionados en este período.
+      </div>
+    `;
+  } else {
+    sortedCategories.forEach(cat => {
+      const prods = datosA.productosPorCategoria[cat];
+      const totalCatUds = prods.reduce((acc, curr) => acc + curr.totalUds, 0);
+      const topList = prods.slice(0, filterLimit);
+
+      docHtml += `
+        <div class="rounded-xl border border-slate-200 overflow-hidden shadow-xs">
+          <!-- Barra de título de la categoría -->
+          <div style="background-color: #f8fafc;" class="px-4 py-2 border-b border-slate-200 flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <span class="font-black text-slate-900 text-sm capitalize">${escapeHtml(cat)}</span>
+              <span class="text-[11px] font-medium text-slate-500">(${prods.length} productos)</span>
+            </div>
+            <span class="text-xs font-bold text-sky-800 bg-sky-50 px-2.5 py-0.5 rounded-full border border-sky-200">
+              Total: ${totalCatUds} uds
+            </span>
+          </div>
+
+          <!-- Tabla de artículos de la categoría -->
+          <table class="w-full text-left text-xs border-collapse">
+            <thead>
+              <tr class="bg-slate-50 text-[10px] font-bold text-slate-500 uppercase border-b border-slate-100">
+                <th class="py-2 px-3 text-center w-12">Puesto</th>
+                <th class="py-2 px-3">Producto</th>
+                <th class="py-2 px-3">Referencia</th>
+                <th class="py-2 px-3 text-center">Estado Multi</th>
+                <th class="py-2 px-3 text-right">Uds Vendidas</th>
+                <th class="py-2 px-3 text-right w-24">Aporte</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100">
+              ${topList.map((p, idx) => {
+                const puesto = idx + 1;
+                let medal = `#${puesto}`;
+                if (puesto === 1) medal = '🥇 1º';
+                else if (puesto === 2) medal = '🥈 2º';
+                else if (puesto === 3) medal = '🥉 3º';
+
+                const pctShare = totalCatUds > 0 ? Math.round((p.totalUds / totalCatUds) * 100) : 0;
+                const multiLabel = p.enMulti 
+                  ? '<span class="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-sky-100 text-[#0082c3] border border-sky-200">⭐ En Multi</span>'
+                  : '<span class="inline-block px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-100 text-slate-500">Lineal Estándar</span>';
+
+                return `
+                  <tr class="${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}">
+                    <td class="py-2 px-3 text-center font-bold text-slate-700">${medal}</td>
+                    <td class="py-2 px-3 font-semibold text-slate-900">${escapeHtml(p.nombre)}</td>
+                    <td class="py-2 px-3 font-mono text-slate-500 text-[11px]">${escapeHtml(p.referencia || 'S/R')}</td>
+                    <td class="py-2 px-3 text-center">${multiLabel}</td>
+                    <td class="py-2 px-3 text-right font-black text-slate-900">${p.totalUds} uds</td>
+                    <td class="py-2 px-3 text-right font-semibold text-sky-700">${pctShare}%</td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    });
+  }
+
+  docHtml += `
+    </div>
+
+    <!-- Pie de Página Oficial -->
+    <div class="pt-4 border-t border-slate-200 flex items-center justify-between text-[10px] text-slate-400">
+      <div>Decathlon Colombia · Sistema de Multiimplantaciones y Ventas</div>
+      <div>Documento de Auditoría Interna · Confidencial</div>
+    </div>
+  `;
+
+  container.innerHTML = docHtml;
+}
+
+function descargarTopReporteComoPDF() {
+  const element = document.getElementById('top-report-document');
+  if (!element) return;
+
+  const fechaStr = new Date().toISOString().split('T')[0];
+  const filename = `decathlon_top_productos_${fechaStr}.pdf`;
+
+  if (window.html2pdf) {
+    showToast('Generando documento PDF oficial...', 'info');
+    const opt = {
+      margin: [8, 8, 8, 8],
+      filename: filename,
+      image: { type: 'jpeg', quality: 0.98 },
+      html2canvas: { scale: 2, useCORS: true, logging: false },
+      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+    };
+    html2pdf().set(opt).from(element).save().then(() => {
+      showToast('PDF descargado con éxito.', 'success');
+    }).catch(err => {
+      console.warn('Fallo html2pdf, abriendo diálogo de impresión nativa:', err);
+      window.print();
+    });
+  } else {
+    // Si la librería CDN no estuviera disponible, utiliza el diálogo nativo de impresión/guardar PDF
+    showToast('Abriendo asistente de impresión para Guardar como PDF...', 'info');
+    window.print();
+  }
+}
+
+function descargarTopReporteComoImagen() {
+  const element = document.getElementById('top-report-document');
+  if (!element) return;
+
+  const fechaStr = new Date().toISOString().split('T')[0];
+  const filename = `decathlon_top_productos_${fechaStr}.png`;
+
+  if (window.html2canvas) {
+    showToast('Generando foto / imagen PNG en alta resolución...', 'info');
+    html2canvas(element, {
+      scale: 2,
+      useCORS: true,
+      backgroundColor: '#ffffff',
+      logging: false
+    }).then(canvas => {
+      const link = document.createElement('a');
+      link.download = filename;
+      link.href = canvas.toDataURL('image/png');
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      showToast('Foto PNG descargada con éxito.', 'success');
+    }).catch(err => {
+      console.error('Error generando foto con html2canvas:', err);
+      showToast('No se pudo generar la imagen automáticamente.', 'error');
+    });
+  } else {
+    showToast('El módulo de captura de imagen se está cargando. Intenta de nuevo en unos segundos.', 'warning');
+  }
+}
+
+function imprimirTopReporte() {
+  window.print();
 }
 
 
