@@ -1,11 +1,11 @@
-# Sistema de Análisis de Multiimplantaciones y Ventas - Decathlon 🏋️‍♂️
+# Sistema de Análisis de Multiimplantaciones y Ventas - Decathlon
 
 Proyecto web para **Decathlon** desarrollado bajo el estándar del **Proyecto Integrador 1 (IU Digital de Antioquia)** y su **Diagrama Entidad-Relación (ER)**, integrado 100% con **Supabase Auth** y **PostgreSQL en tiempo real**, con esquema limpio y sin datos ficticios.
 
 ---
 
-## 🚀 Inicio Rápido
+## Inicio Rápido
 
 1. Servidor local disponible en:  
-   👉 **[http://localhost:8000](http://localhost:8000)**  
+    **[http://localhost:8000](http://localhost:8000)**  
    *(o ejecutando `iniciar.bat` en Windows).*
