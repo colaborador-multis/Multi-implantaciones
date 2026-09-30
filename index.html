@@ -39,7 +39,7 @@
   <!-- Estilos personalizados -->
   <link rel="stylesheet" href="styles.css" />
 </head>
-<body class="bg-slate-50 text-slate-900 min-h-screen flex flex-col font-sans">
+<body class="bg-slate-50 text-slate-900 min-h-screen flex flex-col font-sans overflow-x-hidden w-full max-w-full">
 
   <!-- ========================================================================= -->
   <!-- VISTA DE LOGIN (Autenticación exclusiva con Supabase Auth)                 -->
@@ -224,7 +224,7 @@
     </nav>
 
     <!-- Contenido Principal (padding-bottom en móvil para que no tape la bottom nav) -->
-    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 w-full flex-1 pb-24 md:pb-6">
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 w-full flex-1 pb-24 md:pb-6 min-w-0">
 
       <!-- ===================================================================== -->
       <!-- SECCIÓN CU03: CONSULTAR MULTIIMPLANTACIONES                           -->
@@ -292,8 +292,8 @@
             <select id="filter-multi-estado" 
               class="py-1.5 px-3 text-xs bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:outline-none">
               <option value="todos">Todos los estados</option>
-              <option value="activas">Solo Activas</option>
-              <option value="finalizadas">Solo Finalizadas</option>
+              <option value="activas" selected>Solo Activas (Oculta finalizadas)</option>
+              <option value="finalizadas">Solo Ocultas / Finalizadas</option>
             </select>
           </div>
         </div>
@@ -426,7 +426,7 @@
       <!-- SECCIÓN CU02: REGISTRAR VENTAS SEMANALES                              -->
       <!-- ===================================================================== -->
       <section id="section-ventas" class="hidden grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div class="lg:col-span-1 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+        <div class="lg:col-span-1 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm min-w-0">
           <div class="border-b border-slate-100 pb-4 mb-4">
             <h2 id="ventas-panel-title" class="text-lg font-bold text-slate-900">Registrar Ventas</h2>
             <p id="ventas-panel-desc" class="text-xs text-slate-500 mt-1">Ingresa el total de unidades vendidas semanalmente.</p>
@@ -487,26 +487,96 @@
         </div>
 
         <!-- Tabla de ventas con Buscador y Filtro (Recomendación 2) -->
-        <div class="lg:col-span-2 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col">
-          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 mb-4 border-b border-slate-100">
+        <!-- Panel de Registro y Análisis de Ventas (Organizado y Filtrado) -->
+        <div class="lg:col-span-2 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col space-y-4 min-w-0">
+          
+          <!-- Encabezado y Selector de Vistas -->
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
             <div>
-              <h3 class="text-base font-bold text-slate-900">Historial de Ventas Semanales</h3>
-              <p class="text-xs text-slate-500">Haz clic en Editar para corregir cantidades.</p>
+              <h3 class="text-base font-bold text-slate-900">Historial y Registro de Ventas</h3>
+              <p class="text-xs text-slate-500">Visualiza el comportamiento semanal por producto y edita registros con rapidez.</p>
             </div>
-            <!-- Filtro y búsqueda en ventas -->
-            <div class="flex items-center gap-2">
-              <div class="relative">
-                <input id="filter-ventas-text" type="text" placeholder="Buscar por producto..." oninput="renderVentasTable()"
-                  class="pl-8 pr-2.5 py-1.5 text-xs bg-slate-50 border border-slate-300 rounded-lg w-44 focus:bg-white focus:ring-2 focus:ring-sky-500 focus:outline-none" />
-                <i data-lucide="search" class="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5"></i>
-              </div>
-              <select id="filter-ventas-anio" onchange="renderVentasTable()"
-                class="py-1.5 px-2 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:bg-white focus:ring-2 focus:ring-sky-500 focus:outline-none font-medium">
-                <option value="todos">Todos los años</option>
-              </select>
+            
+            <!-- Toggle de Modo de Vista -->
+            <div class="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200 text-xs">
+              <button type="button" id="btn-vista-ventas-consolidado" onclick="cambiarModoVistaVentas('consolidado')"
+                class="px-3 py-1.5 font-bold rounded-lg transition flex items-center gap-1.5 bg-white text-sky-800 shadow-xs">
+                <i data-lucide="layout-grid" class="w-3.5 h-3.5"></i>
+                <span>Consolidado por Producto</span>
+              </button>
+              <button type="button" id="btn-vista-ventas-detallado" onclick="cambiarModoVistaVentas('detallado')"
+                class="px-3 py-1.5 font-semibold text-slate-600 hover:text-slate-900 rounded-lg transition flex items-center gap-1.5">
+                <i data-lucide="list" class="w-3.5 h-3.5"></i>
+                <span>Detalle por Registro</span>
+              </button>
             </div>
           </div>
-          <div class="overflow-x-auto flex-1">
+
+          <!-- Mini KPIs de Ventas del Período Filtrado -->
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+            <div class="p-3 bg-slate-50 rounded-xl border border-slate-200">
+              <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Volumen Total</span>
+              <span id="kpi-ventas-total-uds" class="text-lg font-black text-sky-700 block mt-0.5">0 uds</span>
+              <span id="kpi-ventas-sub-uds" class="text-[10px] text-slate-500 block">en filtro actual</span>
+            </div>
+            <div class="p-3 bg-slate-50 rounded-xl border border-slate-200">
+              <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Productos</span>
+              <span id="kpi-ventas-prods-count" class="text-lg font-black text-slate-800 block mt-0.5">0</span>
+              <span class="text-[10px] text-slate-500 block">con ventas</span>
+            </div>
+            <div class="p-3 bg-slate-50 rounded-xl border border-slate-200">
+              <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Semanas</span>
+              <span id="kpi-ventas-semanas-count" class="text-lg font-black text-indigo-700 block mt-0.5">0</span>
+              <span class="text-[10px] text-slate-500 block">períodos registrados</span>
+            </div>
+            <div class="p-3 bg-slate-50 rounded-xl border border-slate-200">
+              <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Top 1 Ventas</span>
+              <span id="kpi-ventas-top-prod" class="text-xs font-black text-emerald-800 block mt-1 truncate" title="Sin ventas">—</span>
+              <span id="kpi-ventas-top-uds" class="text-[10px] text-slate-500 block">0 uds</span>
+            </div>
+          </div>
+
+          <!-- Barra de Filtros Inteligentes (Año, Período/Semana, Categoría, Buscador) -->
+          <div class="p-3 bg-slate-50/80 rounded-xl border border-slate-200 flex flex-wrap items-center justify-between gap-2.5 text-xs">
+            <div class="flex flex-wrap items-center gap-2">
+              
+              <!-- Buscador de texto -->
+              <div class="relative">
+                <input id="filter-ventas-text" type="text" placeholder="Buscar producto o ref..." oninput="onCambiarFiltroVentas()"
+                  class="pl-8 pr-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-lg w-44 focus:ring-2 focus:ring-sky-500 focus:outline-none font-medium" />
+                <i data-lucide="search" class="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2"></i>
+              </div>
+
+              <!-- Selector de Año -->
+              <select id="filter-ventas-anio" onchange="onCambiarAnioVentas()"
+                class="py-1.5 px-2.5 text-xs bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:outline-none font-medium">
+                <option value="todos">Todos los años</option>
+              </select>
+
+              <!-- Selector de Semana / Período -->
+              <select id="filter-ventas-semana" onchange="onCambiarFiltroVentas()"
+                class="py-1.5 px-2.5 text-xs bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:outline-none font-medium">
+                <option value="todos">Todas las semanas</option>
+              </select>
+
+              <!-- Selector de Categoría / Deporte -->
+              <select id="filter-ventas-categoria" onchange="onCambiarFiltroVentas()"
+                class="py-1.5 px-2.5 text-xs bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-sky-500 focus:outline-none font-medium">
+                <option value="todas">Todas las categorías</option>
+              </select>
+
+            </div>
+
+            <!-- Botón Limpiar Filtros -->
+            <button type="button" onclick="limpiarFiltrosVentas()" 
+              class="px-2.5 py-1 text-[11px] font-semibold text-slate-500 hover:text-red-700 hover:bg-red-50 rounded-lg border border-slate-200 transition"
+              title="Restablecer todos los filtros">
+              Limpiar filtros
+            </button>
+          </div>
+
+          <!-- Contenedor dinámico de la Tabla (Consolidada o Detallada) -->
+          <div id="contenedor-tabla-ventas" class="overflow-x-auto flex-1 min-h-[300px]">
             <table class="w-full text-left text-xs">
               <thead>
                 <tr class="bg-slate-50 border-b border-slate-200 font-bold text-slate-500 uppercase">
@@ -520,6 +590,25 @@
               <tbody id="tabla-ventas-body" class="divide-y divide-slate-100"></tbody>
             </table>
           </div>
+
+          <!-- Barra de Paginación y Controles Inferiores -->
+          <div id="paginacion-ventas-container" class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-3 border-t border-slate-100 text-xs text-slate-500">
+            <span id="info-paginacion-ventas">Mostrando 0 de 0 registros</span>
+            <div class="flex items-center gap-1.5">
+              <button type="button" id="btn-pag-ant-ventas" onclick="cambiarPaginaVentas(-1)" 
+                class="px-3 py-1 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg font-semibold disabled:opacity-40 disabled:cursor-not-allowed">
+                Anterior
+              </button>
+              <span id="badge-pagina-actual-ventas" class="px-3 py-1 bg-sky-50 text-[#0082c3] font-bold rounded-lg border border-sky-200">
+                Pág. 1
+              </span>
+              <button type="button" id="btn-pag-sig-ventas" onclick="cambiarPaginaVentas(1)" 
+                class="px-3 py-1 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg font-semibold disabled:opacity-40 disabled:cursor-not-allowed">
+                Siguiente
+              </button>
+            </div>
+          </div>
+
         </div>
       </section>
 
@@ -903,7 +992,7 @@
       <!-- SECCIÓN RF02: CATÁLOGO DE PRODUCTOS (ADMIN)                           -->
       <!-- ===================================================================== -->
       <section id="section-productos" class="hidden grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div class="lg:col-span-1 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+        <div class="lg:col-span-1 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm min-w-0">
           <h2 class="text-lg font-bold text-slate-900 mb-1">Nuevo Producto</h2>
           <p class="text-xs text-slate-500 mb-5">Agregar artículo a la base de datos Decathlon.</p>
           <form id="form-producto" onsubmit="handleCrearProducto(event)" class="space-y-4">
@@ -933,10 +1022,10 @@
           <div class="mt-6 pt-5 border-t border-slate-200">
             <div class="flex items-center justify-between mb-2">
               <span class="text-xs font-bold text-slate-800">Categorías Disponibles</span>
-              <span id="badge-admin-only-cat" class="text-[10px] text-purple-700 bg-purple-50 px-2 py-0.5 rounded font-bold">Admin: Gestionar</span>
+              <span id="badge-admin-only-cat" class="text-[10px] text-purple-700 bg-purple-50 px-2 py-0.5 rounded font-bold">Admin / Responsable: Gestionar</span>
             </div>
             
-            <!-- Input para añadir nueva categoría (Solo Admin) -->
+            <!-- Input para añadir nueva categoría (Solo Admin y Responsables) -->
             <div id="admin-add-cat-box" class="flex gap-2 mb-3">
               <input id="nueva-categoria-nombre" type="text" placeholder="Ej. natación, ciclismo..." 
                 class="flex-1 px-3 py-1.5 bg-slate-50 border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-sky-500 focus:outline-none" />
@@ -947,27 +1036,44 @@
               </button>
             </div>
 
-            <!-- Chips de categorías con botón de eliminar para el Admin -->
+            <!-- Chips de categorías con botón de eliminar para Admin y Responsables -->
             <div id="lista-categorias-chips" class="flex flex-wrap gap-1.5">
               <!-- Se inyectan dinámicamente -->
             </div>
           </div>
         </div>
 
-        <div class="lg:col-span-2 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-          <h3 class="text-base font-bold text-slate-900 mb-4">Catálogo de Productos</h3>
-          <div class="overflow-x-auto">
-            <table class="w-full text-left text-xs">
-              <thead>
-                <tr class="bg-slate-50 border-b border-slate-200 font-bold text-slate-500 uppercase">
-                  <th class="px-5 py-2.5">Producto</th>
-                  <th class="px-5 py-2.5">Referencia</th>
-                  <th class="px-5 py-2.5">Categoría</th>
-                  <th class="px-5 py-2.5 text-right">Acción</th>
-                </tr>
-              </thead>
-              <tbody id="tabla-productos-body" class="divide-y divide-slate-100"></tbody>
-            </table>
+        <!-- Panel del Catálogo Organizado por Categoría -->
+        <div class="lg:col-span-2 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm min-w-0 flex flex-col space-y-4">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+            <div>
+              <h3 class="text-base font-bold text-slate-900">Catálogo de Productos por Categoría</h3>
+              <p class="text-xs text-slate-500">Artículos segmentados por disciplina deportiva o categoría.</p>
+            </div>
+            <div class="flex flex-wrap items-center gap-2.5">
+              <div class="relative">
+                <input id="filter-prods-text" type="text" oninput="renderProductsTable()" placeholder="Buscar producto o ref..."
+                  class="pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-300 rounded-lg text-xs focus:bg-white focus:ring-2 focus:ring-sky-500 focus:outline-none w-48 font-medium" />
+                <i data-lucide="search" class="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2"></i>
+              </div>
+              <label class="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer select-none bg-slate-50 px-2.5 py-1.5 rounded-lg border border-slate-200 font-medium">
+                <input id="chk-mostrar-ocultos-prod" type="checkbox" onchange="renderProductsTable()" class="rounded text-sky-600 focus:ring-sky-500">
+                <span>Mostrar ocultos (<span id="count-prods-ocultos">0</span>)</span>
+              </label>
+            </div>
+          </div>
+
+          <!-- Barra de Pestañas / Chips de Filtro Rápido por Categoría -->
+          <div class="space-y-1.5">
+            <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Filtrar por disciplina:</span>
+            <div id="container-filtro-categoria-prods" class="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
+              <!-- Inyectado dinámicamente con chips de categorías -->
+            </div>
+          </div>
+
+          <!-- Contenedor dinámico de Productos Agrupados por Categoría -->
+          <div id="contenedor-catalogo-productos" class="space-y-4 flex-1">
+            <!-- Se llena dinámicamente agrupado por categorías -->
           </div>
         </div>
       </section>
@@ -976,7 +1082,7 @@
       <!-- SECCIÓN RF10: GESTIÓN DE USUARIOS (ROL EXCLUSIVO ADMINISTRADOR)       -->
       <!-- ===================================================================== -->
       <section id="section-usuarios" class="hidden grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div class="lg:col-span-1 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+        <div class="lg:col-span-1 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm min-w-0">
           <div class="flex items-center gap-2 mb-1">
             <span class="p-1.5 rounded-lg bg-purple-100 text-purple-700">
               <i data-lucide="shield" class="w-4 h-4"></i>
@@ -1011,7 +1117,7 @@
           </form>
         </div>
 
-        <div class="lg:col-span-2 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+        <div class="lg:col-span-2 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm min-w-0">
           <div class="flex items-center justify-between pb-3 mb-4 border-b border-slate-100">
             <div>
               <h3 class="text-base font-bold text-slate-900">Usuarios Registrados en Supabase</h3>
@@ -1101,7 +1207,7 @@
           <i data-lucide="alert-triangle" class="w-5 h-5 text-amber-600"></i>
         </div>
         <div>
-          <h3 class="text-base font-bold text-slate-900">¿Eliminar esta multiimplantación?</h3>
+          <h3 id="del-multi-titulo-modal" class="text-base font-bold text-slate-900">¿Eliminar esta multiimplantación?</h3>
           <p class="text-xs text-slate-500">Ubicación: <span id="del-multi-ubicacion-text" class="font-bold text-slate-800"></span></p>
         </div>
       </div>
@@ -1126,10 +1232,10 @@
         <button type="button" onclick="ejecutarDesactivarMulti()" 
           class="w-full py-2.5 px-3 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-lg text-xs shadow transition flex items-center justify-center gap-1.5">
           <i data-lucide="power" class="w-4 h-4"></i>
-          <span>Desactivar / Finalizar (Recomendado, conserva historial)</span>
+          <span id="btn-desactivar-multi-text">Desactivar / Ocultar (Recomendado, conserva historial)</span>
         </button>
 
-        <button type="button" onclick="ejecutarEliminarFisicoMulti()" 
+        <button type="button" id="btn-eliminar-fisico-multi" onclick="ejecutarEliminarFisicoMulti()" 
           class="w-full py-2.5 px-3 bg-red-50 hover:bg-red-100 text-red-700 font-semibold rounded-lg text-xs border border-red-200 transition flex items-center justify-center gap-1.5">
           <i data-lucide="trash-2" class="w-4 h-4"></i>
           <span>Eliminar Definitivamente de la Base de Datos</span>
@@ -1188,14 +1294,21 @@
             class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-sm focus:bg-white focus:ring-2 focus:ring-sky-500 focus:outline-none font-bold text-sky-800" />
         </div>
 
-        <div class="pt-3 border-t border-slate-100 flex items-center justify-end gap-2">
-          <button type="button" onclick="cerrarModal('modal-editar-venta')" class="px-4 py-2 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100 transition">
-            Cancelar
+        <div class="pt-3 border-t border-slate-100 flex items-center justify-between">
+          <button type="button" id="btn-del-venta" onclick="ejecutarEliminarVentaModal()" 
+            class="px-3 py-1.5 rounded-lg text-xs font-semibold text-red-600 hover:bg-red-50 border border-red-200 transition flex items-center gap-1">
+            <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+            <span>Eliminar Venta</span>
           </button>
-          <button type="submit" class="px-4 py-2 rounded-lg text-xs font-bold bg-[#0082c3] hover:bg-[#006699] text-white shadow transition flex items-center gap-1.5">
-            <i data-lucide="check" class="w-3.5 h-3.5"></i>
-            <span>Actualizar Venta</span>
-          </button>
+          <div class="flex items-center gap-2">
+            <button type="button" onclick="cerrarModal('modal-editar-venta')" class="px-4 py-2 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100 transition">
+              Cancelar
+            </button>
+            <button type="submit" class="px-4 py-2 rounded-lg text-xs font-bold bg-[#0082c3] hover:bg-[#006699] text-white shadow transition flex items-center gap-1.5">
+              <i data-lucide="check" class="w-3.5 h-3.5"></i>
+              <span>Actualizar Venta</span>
+            </button>
+          </div>
         </div>
       </form>
     </div>

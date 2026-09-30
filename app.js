@@ -24,6 +24,11 @@ const AppState = {
   modoRegistroMulti: 'nueva',
   modoVentas: 'regular',
   modoComparativaTop: false,
+  productosOcultos: new Set(),
+  vistaVentasModo: 'consolidado',
+  ventasPaginaActual: 1,
+  ventasPorPagina: 20,
+  categoriaFiltroCatalogo: 'todas',
 
   data: {
     usuarios: [],
@@ -34,6 +39,65 @@ const AppState = {
     categorias: []
   }
 };
+
+// Control de Permisos: Solo Administrador y Responsables pueden eliminar de la base de datos
+function puedeEliminarDeBD() {
+  const rol = (AppState.currentUser?.rol || '').toLowerCase().trim();
+  return rol === 'administrador' || rol === 'admin' || rol.includes('responsable');
+}
+
+// Gestión de productos ocultos (soft-hide) para asesores y catálogo
+function cargarProductosOcultos() {
+  AppState.productosOcultos = new Set();
+  try {
+    const raw = localStorage.getItem('decathlon_productos_ocultos');
+    if (raw) {
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr)) {
+        arr.forEach(id => AppState.productosOcultos.add(id));
+      }
+    }
+  } catch (e) {}
+
+  (AppState.data.productos || []).forEach(p => {
+    if (p.oculto === true || p.oculto === 'true' || p.oculto === 1) {
+      AppState.productosOcultos.add(p.id_producto);
+    }
+  });
+}
+
+function esProductoOculto(idProducto) {
+  return AppState.productosOcultos.has(idProducto);
+}
+
+async function toggleOcultarProducto(idProducto) {
+  const prod = AppState.data.productos.find(p => p.id_producto === idProducto);
+  const nombre = prod ? prod.nombre : 'Producto';
+  const yaOculto = AppState.productosOcultos.has(idProducto);
+
+  if (yaOculto) {
+    AppState.productosOcultos.delete(idProducto);
+    showToast(`Producto "${nombre}" ahora es visible en el catálogo.`, 'success');
+  } else {
+    AppState.productosOcultos.add(idProducto);
+    showToast(`Producto "${nombre}" ocultado del catálogo activo.`, 'info');
+  }
+
+  try {
+    localStorage.setItem('decathlon_productos_ocultos', JSON.stringify([...AppState.productosOcultos]));
+  } catch (e) {}
+
+  if (AppState.supabase && AppState.isOnline) {
+    try {
+      await AppState.supabase.from('producto').update({ oculto: !yaOculto }).eq('id_producto', idProducto);
+    } catch (e) {}
+  }
+
+  renderProductsTable();
+  populateProductSelects();
+  populateEvaluationSelectors();
+  populateTopCategoryFilter();
+}
 
 // Utilidad de Seguridad: Sanitización estricta contra Inyecciones (XSS)
 function escapeHtml(str) {
@@ -402,6 +466,8 @@ function switchTab(tabId) {
 
   if (tabId === 'ventas') {
     populateProductSelects();
+    actualizarSelectoresFiltroVentas();
+    renderVentasTable();
   }
 
   if (tabId === 'top-productos') {
@@ -410,6 +476,7 @@ function switchTab(tabId) {
 
   if (tabId === 'productos') {
     renderCategoriesUI();
+    renderProductsTable();
   }
 
   if (window.lucide) {
@@ -434,7 +501,10 @@ async function loadAllData() {
     ]);
 
     if (!uRes.error && uRes.data) AppState.data.usuarios = uRes.data;
-    if (!pRes.error && pRes.data) AppState.data.productos = pRes.data;
+    if (!pRes.error && pRes.data) {
+      AppState.data.productos = pRes.data;
+      cargarProductosOcultos();
+    }
     if (!mRes.error && mRes.data) AppState.data.multiimplantaciones = mRes.data;
     if (!pmRes.error && pmRes.data) AppState.data.producto_multi = pmRes.data;
     if (!vRes.error && vRes.data) AppState.data.ventas_semanales = vRes.data;
@@ -456,6 +526,7 @@ async function loadAllData() {
   populateProductSelects();
   renderProductsTable();
   renderUsersTable();
+  actualizarSelectoresFiltroVentas();
   renderVentasTable();
   populateEvaluationSelectors();
   renderCategoriesUI();
@@ -652,43 +723,224 @@ async function handleCrearProducto(e) {
   await loadAllData();
 }
 
+function getCategoryIcon(cat) {
+  const c = (cat || '').toLowerCase().trim();
+  if (c.includes('fútbol') || c.includes('futbol') || c.includes('soccer')) return '⚽';
+  if (c.includes('senderismo') || c.includes('montaña') || c.includes('camping') || c.includes('quechua')) return '🥾';
+  if (c.includes('ciclismo') || c.includes('bici')) return '🚴';
+  if (c.includes('natación') || c.includes('natacion') || c.includes('agua') || c.includes('piscina')) return '🏊';
+  if (c.includes('running') || c.includes('correr') || c.includes('atletismo')) return '🏃';
+  if (c.includes('fitness') || c.includes('gimnasio') || c.includes('pesas')) return '🏋️';
+  if (c.includes('tenis') || c.includes('padel') || c.includes('raqueta')) return '🎾';
+  if (c.includes('baloncesto') || c.includes('basket')) return '🏀';
+  if (c.includes('sin categoría') || !c) return '⚠️';
+  return '🏅';
+}
+
+function seleccionarCategoriaCatalogo(cat) {
+  AppState.categoriaFiltroCatalogo = cat;
+  renderProductsTable();
+}
+
 function renderProductsTable() {
-  const tbody = document.getElementById('tabla-productos-body');
-  if (!tbody) return;
-  tbody.innerHTML = '';
+  const container = document.getElementById('contenedor-catalogo-productos');
+  const pillsContainer = document.getElementById('container-filtro-categoria-prods');
 
-  const esAdmin = AppState.currentUser?.rol === 'Administrador';
+  const esAdminOResp = puedeEliminarDeBD();
+  const filterQuery = (document.getElementById('filter-prods-text')?.value || '').toLowerCase().trim();
+  const chkMostrarOcultos = document.getElementById('chk-mostrar-ocultos-prod');
+  const mostrarOcultos = chkMostrarOcultos ? chkMostrarOcultos.checked : false;
 
-  if (AppState.data.productos.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="4" class="px-5 py-6 text-center text-slate-400">No hay productos registrados aún en Supabase. Agrega uno arriba.</td></tr>`;
+  const totalOcultos = AppState.data.productos.filter(p => esProductoOculto(p.id_producto)).length;
+  const countBadge = document.getElementById('count-prods-ocultos');
+  if (countBadge) countBadge.textContent = totalOcultos;
+
+  // Filtrar productos según ocultos y texto de búsqueda
+  const productosFiltrados = AppState.data.productos.filter(p => {
+    const oculto = esProductoOculto(p.id_producto);
+    if (oculto && !mostrarOcultos) return false;
+
+    if (filterQuery) {
+      const matchName = (p.nombre || '').toLowerCase().includes(filterQuery);
+      const matchRef = (p.referencia || '').toLowerCase().includes(filterQuery);
+      const matchCat = (p.categoria || '').toLowerCase().includes(filterQuery);
+      if (!matchName && !matchRef && !matchCat) return false;
+    }
+    return true;
+  });
+
+  // Agrupar productos por categoría
+  const categoriasMap = {};
+  productosFiltrados.forEach(p => {
+    let cat = (p.categoria || '').trim();
+    if (!cat) cat = 'Sin categoría';
+    if (!categoriasMap[cat]) {
+      categoriasMap[cat] = [];
+    }
+    categoriasMap[cat].push(p);
+  });
+
+  // Lista ordenada de nombres de categorías (con 'Sin categoría' al final si existe)
+  const catNames = Object.keys(categoriasMap).sort((a, b) => {
+    if (a.toLowerCase() === 'sin categoría') return 1;
+    if (b.toLowerCase() === 'sin categoría') return -1;
+    return a.localeCompare(b);
+  });
+
+  // Renderizar los chips/pills de selección rápida por categoría
+  if (pillsContainer) {
+    pillsContainer.innerHTML = '';
+    const catActual = AppState.categoriaFiltroCatalogo || 'todas';
+
+    // Chip "Todas"
+    const btnTodas = document.createElement('button');
+    btnTodas.type = 'button';
+    btnTodas.onclick = () => seleccionarCategoriaCatalogo('todas');
+    btnTodas.className = `px-3 py-1.5 rounded-lg whitespace-nowrap transition flex items-center gap-1.5 font-bold text-xs ${
+      catActual === 'todas'
+        ? 'bg-[#0082c3] text-white shadow-xs'
+        : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+    }`;
+    btnTodas.innerHTML = `<span>Todas</span> <span class="text-[10px] px-1.5 py-0.2 rounded-full ${
+      catActual === 'todas' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700 font-bold'
+    }">${productosFiltrados.length}</span>`;
+    pillsContainer.appendChild(btnTodas);
+
+    // Chips por cada categoría
+    catNames.forEach(cat => {
+      const prodsCount = categoriasMap[cat].length;
+      const esActiva = catActual.toLowerCase() === cat.toLowerCase();
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.onclick = () => seleccionarCategoriaCatalogo(cat);
+      btn.className = `px-3 py-1.5 rounded-lg whitespace-nowrap transition flex items-center gap-1.5 capitalize text-xs ${
+        esActiva
+          ? 'bg-[#0082c3] text-white font-bold shadow-xs'
+          : 'bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold'
+      }`;
+      btn.innerHTML = `<span>${getCategoryIcon(cat)}</span> <span>${escapeHtml(cat)}</span> <span class="text-[10px] px-1.5 py-0.2 rounded-full ${
+        esActiva ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700 font-bold'
+      }">${prodsCount}</span>`;
+      pillsContainer.appendChild(btn);
+    });
+  }
+
+  if (!container) return;
+
+  if (productosFiltrados.length === 0) {
+    const msg = AppState.data.productos.length === 0
+      ? 'No hay productos registrados aún en Supabase. Agrega uno con el formulario lateral.'
+      : (totalOcultos > 0 && !mostrarOcultos
+          ? `Hay ${totalOcultos} producto(s) oculto(s). Marca la casilla "Mostrar ocultos" para visualizarlos o restaurarlos.`
+          : 'No se encontraron productos que coincidan con los filtros aplicados.');
+    container.innerHTML = `
+      <div class="py-12 flex flex-col items-center justify-center text-center text-slate-400 bg-slate-50/50 rounded-2xl border border-slate-200 p-6">
+        <i data-lucide="package-search" class="w-10 h-10 mb-2 text-slate-300"></i>
+        <p class="font-bold text-slate-700 text-sm">${msg}</p>
+      </div>
+    `;
+    if (window.lucide) lucide.createIcons();
     return;
   }
 
-  AppState.data.productos.forEach(p => {
-    const safeNombre = escapeHtml(p.nombre);
-    const safeRef = escapeHtml(p.referencia);
-    const safeCat = escapeHtml(p.categoria);
-    const safeId = escapeHtml(p.id_producto);
-    const tr = document.createElement('tr');
-    tr.className = 'hover:bg-slate-50 border-b border-slate-200 transition-colors';
-    tr.innerHTML = `
-      <td class="px-5 py-3 font-semibold text-slate-800">${safeNombre}</td>
-      <td class="px-5 py-3 font-mono text-xs text-sky-700">${safeRef}</td>
-      <td class="px-5 py-3 text-slate-600 capitalize">${safeCat}</td>
-      <td class="px-5 py-3 text-right space-x-2">
-        <button onclick="abrirEditarProducto('${safeId}')" 
-          class="text-xs text-sky-700 hover:text-sky-900 font-semibold underline transition">
-          Editar
-        </button>
-        ${esAdmin ? `
-          <button onclick="eliminarProducto('${safeId}', '${safeNombre.replace(/'/g, "\\'")}')" 
-            class="text-xs text-red-600 hover:text-red-800 font-semibold underline transition">
-            Eliminar
-          </button>` : ''}
-      </td>
+  // Filtrar categorías si hay una específica seleccionada
+  const catSeleccionada = AppState.categoriaFiltroCatalogo || 'todas';
+  const categoriasAMostrar = catSeleccionada === 'todas'
+    ? catNames
+    : catNames.filter(c => c.toLowerCase() === catSeleccionada.toLowerCase());
+
+  let html = '';
+
+  categoriasAMostrar.forEach(cat => {
+    const prods = categoriasMap[cat] || [];
+    const esSinCat = cat.toLowerCase() === 'sin categoría';
+    const icon = getCategoryIcon(cat);
+
+    html += `
+      <div class="bg-white rounded-2xl border ${esSinCat ? 'border-amber-300 shadow-sm' : 'border-slate-200 shadow-xs'} overflow-hidden transition-all">
+        <!-- Cabecera de Categoría -->
+        <div class="px-5 py-3 ${esSinCat ? 'bg-amber-50/80 border-b border-amber-200' : 'bg-slate-50/90 border-b border-slate-100'} flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div class="flex items-center gap-2.5">
+            <span class="w-8 h-8 rounded-xl ${esSinCat ? 'bg-amber-100 text-amber-800' : 'bg-sky-100 text-[#0082c3]'} flex items-center justify-center text-sm font-bold shadow-2xs">
+              ${icon}
+            </span>
+            <div>
+              <div class="flex items-center gap-2">
+                <h4 class="font-black text-slate-900 text-sm capitalize">${escapeHtml(cat)}</h4>
+                <span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${esSinCat ? 'bg-amber-200 text-amber-900' : 'bg-white text-slate-600 border border-slate-200'}">
+                  ${prods.length} ${prods.length === 1 ? 'artículo' : 'artículos'}
+                </span>
+              </div>
+              ${esSinCat ? '<p class="text-[11px] text-amber-700 mt-0.5">⚠️ Productos sin categoría definida. Asígnales un deporte haciendo clic en "Editar".</p>' : ''}
+            </div>
+          </div>
+          <span class="text-[11px] text-slate-400 font-medium hidden sm:block">Disciplina Decathlon</span>
+        </div>
+
+        <!-- Tabla de Productos de la Categoría -->
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs whitespace-nowrap">
+            <thead>
+              <tr class="bg-slate-50/40 border-b border-slate-100 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                <th class="px-5 py-2.5">Producto</th>
+                <th class="px-4 py-2.5">Referencia Decathlon</th>
+                <th class="px-4 py-2.5 text-center">Estado</th>
+                <th class="px-5 py-2.5 text-right">Acción</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100">
     `;
-    tbody.appendChild(tr);
+
+    prods.forEach(p => {
+      const safeNombre = escapeHtml(p.nombre);
+      const safeRef = escapeHtml(p.referencia);
+      const safeId = escapeHtml(p.id_producto);
+      const estaOculto = esProductoOculto(p.id_producto);
+
+      const badgeEstado = estaOculto
+        ? '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200">Oculto</span>'
+        : '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">Activo</span>';
+
+      html += `
+        <tr class="hover:bg-slate-50 border-b border-slate-100 transition-colors ${estaOculto ? 'bg-amber-50/30 opacity-75' : ''}">
+          <td class="px-5 py-3 font-semibold text-slate-800">
+            <div class="font-bold text-slate-900">${safeNombre}</div>
+          </td>
+          <td class="px-4 py-3 font-mono text-xs text-sky-700 font-semibold">${safeRef}</td>
+          <td class="px-4 py-3 text-center">${badgeEstado}</td>
+          <td class="px-5 py-3 text-right space-x-2 whitespace-nowrap">
+            <button onclick="abrirEditarProducto('${safeId}')" 
+              class="text-xs text-sky-700 hover:text-sky-900 font-bold underline transition">
+              Editar
+            </button>
+
+            <button onclick="toggleOcultarProducto('${safeId}')" 
+              class="text-xs font-semibold underline transition ${estaOculto ? 'text-emerald-700 hover:text-emerald-900' : 'text-amber-700 hover:text-amber-900'}"
+              title="${estaOculto ? 'Restaurar y hacer visible este producto' : 'Ocultar producto del catálogo activo sin borrarlo de la base de datos'}">
+              ${estaOculto ? 'Mostrar' : 'Ocultar'}
+            </button>
+
+            ${esAdminOResp ? `
+              <button onclick="eliminarProducto('${safeId}', '${safeNombre.replace(/'/g, "\\'")}')" 
+                class="text-xs text-red-600 hover:text-red-800 font-semibold underline transition"
+                title="Eliminar permanentemente de la base de datos">
+                Eliminar
+              </button>` : ''}
+          </td>
+        </tr>
+      `;
+    });
+
+    html += `
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
   });
+
+  container.innerHTML = html;
+  if (window.lucide) lucide.createIcons();
 }
 
 function abrirEditarProducto(idProducto) {
@@ -765,8 +1017,8 @@ async function guardarEditarProducto(e) {
 }
 
 async function eliminarProducto(id_producto, nombre) {
-  if (AppState.currentUser?.rol !== 'Administrador') {
-    showToast('Solo el Administrador tiene permisos para eliminar productos.', 'error');
+  if (!puedeEliminarDeBD()) {
+    showToast('Solo el Administrador y los Responsables tienen permisos para eliminar productos de la base de datos. Como asesor, puedes ocultarlo.', 'error');
     return;
   }
 
@@ -786,7 +1038,7 @@ async function eliminarProducto(id_producto, nombre) {
     return;
   }
 
-  showToast(`Producto "${nombre}" eliminado del catálogo.`, 'success');
+  showToast(`Producto "${nombre}" eliminado de la base de datos.`, 'success');
   await loadAllData();
 }
 
@@ -800,11 +1052,14 @@ function renderCategoriesUI() {
 
   if (!select || !chipsContainer) return;
 
-  const esAdmin = AppState.currentUser?.rol === 'Administrador';
+  const esAdminOResp = puedeEliminarDeBD();
 
-  // Mostrar/ocultar controles de admin
-  if (addBox) addBox.style.display = esAdmin ? 'flex' : 'none';
-  if (badge) badge.style.display = esAdmin ? 'inline-block' : 'none';
+  // Mostrar/ocultar controles de admin y responsable
+  if (addBox) addBox.style.display = esAdminOResp ? 'flex' : 'none';
+  if (badge) {
+    badge.style.display = esAdminOResp ? 'inline-block' : 'none';
+    badge.textContent = 'Admin / Responsable: Gestionar';
+  }
 
   // Poblar el <select> del formulario de producto
   const valorActual = select.value;
@@ -827,11 +1082,11 @@ function renderCategoriesUI() {
   AppState.data.categorias.forEach(cat => {
     const chip = document.createElement('span');
     chip.className = 'inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-sky-50 text-sky-800 border border-sky-200';
-    if (esAdmin) {
+    if (esAdminOResp) {
       chip.innerHTML = `
         <span class="capitalize">${cat.nombre}</span>
         <button type="button" onclick="eliminarCategoria('${cat.id_categoria}', '${cat.nombre}')"
-          class="ml-1 text-sky-500 hover:text-red-600 transition-colors font-bold leading-none" title="Eliminar categoría">×</button>
+          class="ml-1 text-sky-500 hover:text-red-600 transition-colors font-bold leading-none" title="Eliminar categoría de la BD">×</button>
       `;
     } else {
       chip.innerHTML = `<span class="capitalize">${cat.nombre}</span>`;
@@ -841,6 +1096,11 @@ function renderCategoriesUI() {
 }
 
 async function handleCrearCategoria() {
+  if (!puedeEliminarDeBD()) {
+    showToast('Solo el Administrador y los Responsables pueden crear o gestionar categorías.', 'warning');
+    return;
+  }
+
   const input = document.getElementById('nueva-categoria-nombre');
   const nombre = input ? input.value.trim().toLowerCase() : '';
 
@@ -910,7 +1170,12 @@ function cargarCategoriasLocales() {
 }
 
 async function eliminarCategoria(id_categoria, nombre) {
-  if (!confirm(`¿Eliminar la categoría "${nombre}"?`)) return;
+  if (!puedeEliminarDeBD()) {
+    showToast('Solo el Administrador y los Responsables pueden eliminar categorías de la base de datos.', 'error');
+    return;
+  }
+
+  if (!confirm(`¿Eliminar la categoría "${nombre}" de la base de datos?`)) return;
 
   if (AppState.isOnline && AppState.supabase && !id_categoria.startsWith('local-')) {
     try {
@@ -920,7 +1185,7 @@ async function eliminarCategoria(id_categoria, nombre) {
 
   AppState.data.categorias = AppState.data.categorias.filter(c => c.id_categoria !== id_categoria && c.nombre !== nombre);
   guardarCategoriasLocales();
-  showToast(`Categoría "${nombre}" eliminada.`, 'info');
+  showToast(`Categoría "${nombre}" eliminada de la base de datos.`, 'info');
   renderCategoriesUI();
 }
 
@@ -2698,6 +2963,8 @@ function renderListaProductosCheckbox() {
     : '';
 
   const productosFiltrados = AppState.data.productos.filter(p => {
+    // Si el producto está oculto y no hay búsqueda de texto específica, omitir para no saturar
+    if (esProductoOculto(p.id_producto) && !query) return false;
     const coincideCat = (catFilter === 'todas') || (p.categoria && p.categoria.toLowerCase() === catFilter);
     const coincideTexto = !query || 
       (p.nombre && p.nombre.toLowerCase().includes(query)) || 
@@ -3117,6 +3384,8 @@ function renderMultiimplantacionesTable() {
     return;
   }
 
+  const esAdminOResp = puedeEliminarDeBD();
+
   list.forEach(m => {
     const creador     = AppState.data.usuarios.find(u => u.id_usuario === m.id_usuario);
     const modificador = m.modificado_por
@@ -3131,8 +3400,7 @@ function renderMultiimplantacionesTable() {
       return `<div class="flex items-center justify-between text-xs py-1 border-b border-slate-100 last:border-0">
         <span class="font-medium text-slate-700 truncate mr-2" title="${safeNombre}">${safeNombre}</span>
         ${pm.fecha_fin ? `<span class="text-slate-400 text-[10px]">Fin: ${escapeHtml(pm.fecha_fin)}</span>` : 
-        (AppState.currentUser?.rol !== 'Responsable de tienda' ? 
-          `<button onclick="finalizarProductoMulti('${escapeHtml(pm.id_producto_multi)}')" class="text-[11px] text-red-600 hover:text-red-800 underline">Finalizar</button>` : '')}
+          `<button onclick="finalizarProductoMulti('${escapeHtml(pm.id_producto_multi)}')" class="text-[11px] text-amber-700 hover:text-amber-900 underline" title="Ocultar o finalizar este producto de la cabecera">Finalizar</button>`}
       </div>`;
     }).join('');
 
@@ -3165,7 +3433,7 @@ function renderMultiimplantacionesTable() {
       <td class="px-5 py-3.5 whitespace-nowrap text-sm">
         ${isActive ? 
           '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800"><span class="w-1.5 h-1.5 mr-1.5 rounded-full bg-emerald-500"></span>Activa</span>' : 
-          '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-700">Finalizada</span>'}
+          '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-700">Oculta / Finalizada</span>'}
       </td>
       <td class="px-5 py-3.5 whitespace-nowrap text-right text-sm space-x-1.5">
         <button onclick="verAnalisisDirecto('${escapeHtml(m.id_multiimplantacion)}')" class="px-2.5 py-1 text-xs font-medium rounded-md text-sky-700 bg-sky-50 hover:bg-sky-100 transition-colors" title="Comparar ventas">
@@ -3174,9 +3442,15 @@ function renderMultiimplantacionesTable() {
         <button onclick="abrirEditarMulti('${escapeHtml(m.id_multiimplantacion)}')" class="px-2.5 py-1 text-xs font-medium rounded-md text-amber-700 bg-amber-50 hover:bg-amber-100 transition-colors" title="Editar multiimplantación">
           Editar
         </button>
-        <button onclick="abrirEliminarMulti('${escapeHtml(m.id_multiimplantacion)}')" class="px-2.5 py-1 text-xs font-medium rounded-md text-red-600 bg-red-50 hover:bg-red-100 transition-colors" title="Eliminar o desactivar">
-          Eliminar
-        </button>
+        ${esAdminOResp ? `
+          <button onclick="abrirEliminarMulti('${escapeHtml(m.id_multiimplantacion)}')" class="px-2.5 py-1 text-xs font-medium rounded-md text-red-600 bg-red-50 hover:bg-red-100 transition-colors" title="Eliminar de base de datos o desactivar">
+            Eliminar
+          </button>
+        ` : `
+          <button onclick="abrirEliminarMulti('${escapeHtml(m.id_multiimplantacion)}')" class="px-2.5 py-1 text-xs font-medium rounded-md text-amber-700 bg-amber-50 hover:bg-amber-100 transition-colors" title="Ocultar o desactivar de la exhibición activa">
+            Ocultar
+          </button>
+        `}
       </td>
     `;
     tbody.appendChild(tr);
@@ -3340,27 +3614,61 @@ function abrirEliminarMulti(idMulti) {
   const m = AppState.data.multiimplantaciones.find(item => item.id_multiimplantacion === idMulti);
   if (!m) return;
 
+  const esAdminOResp = puedeEliminarDeBD();
+
   document.getElementById('del-multi-id').value = idMulti;
   const textEl = document.getElementById('del-multi-ubicacion-text');
   if (textEl) textEl.innerText = `"${m.ubicacion}" (${m.fecha_inicio})`;
 
+  const modalTitle = document.getElementById('del-multi-titulo-modal');
+  if (modalTitle) {
+    modalTitle.innerText = esAdminOResp 
+      ? '¿Eliminar o desactivar esta multiimplantación?' 
+      : '¿Ocultar o finalizar esta multiimplantación?';
+  }
+
   const relations = AppState.data.producto_multi.filter(pm => pm.id_multiimplantacion === idMulti);
   const infoBox = document.getElementById('del-multi-info-box');
   if (infoBox) {
-    infoBox.innerHTML = `
-      <p class="font-semibold text-amber-900">Control de Integridad Histórica:</p>
-      <p class="text-[11px] text-amber-800">
-        Esta multiimplantación tiene <strong>${relations.length} productos asociados</strong>. 
-        Recomendamos <strong>Desactivar / Finalizar</strong> para conservar el historial de ventas y la comparativa sin romper los gráficos.
-      </p>
-    `;
+    if (esAdminOResp) {
+      infoBox.innerHTML = `
+        <p class="font-semibold text-amber-900">Control de Integridad Histórica:</p>
+        <p class="text-[11px] text-amber-800">
+          Esta multiimplantación tiene <strong>${relations.length} productos asociados</strong>. 
+          Recomendamos <strong>Desactivar / Ocultar</strong> para conservar el historial de ventas y la comparativa. 
+          Como ${escapeHtml(AppState.currentUser?.rol || 'Responsable')}, también puedes eliminarla definitivamente de la base de datos si fue un registro de prueba o erróneo.
+        </p>
+      `;
+    } else {
+      infoBox.innerHTML = `
+        <p class="font-semibold text-sky-900">Ocultar de la Exhibición Activa:</p>
+        <p class="text-[11px] text-sky-800">
+          Como Asesor comercial, puedes <strong>Ocultar / Finalizar</strong> esta multiimplantación para archivarla sin perder el historial ni alterar las métricas. 
+          La eliminación definitiva de la base de datos es exclusiva para el Administrador y los Responsables.
+        </p>
+      `;
+    }
+  }
+
+  const btnEliminarFisico = document.getElementById('btn-eliminar-fisico-multi');
+  if (btnEliminarFisico) {
+    btnEliminarFisico.style.display = esAdminOResp ? 'flex' : 'none';
+  }
+
+  const btnDesactivar = document.getElementById('btn-desactivar-multi-text');
+  if (btnDesactivar) {
+    btnDesactivar.innerText = esAdminOResp 
+      ? 'Desactivar / Ocultar (Recomendado, conserva historial)' 
+      : 'Ocultar / Finalizar exhibición';
+  }
+
   const inputFechaFin = document.getElementById('del-multi-fecha-fin');
   if (inputFechaFin) {
     inputFechaFin.value = new Date().toISOString().split('T')[0];
   }
 
   abrirModal('modal-confirmar-eliminar-multi');
-}}
+}
 
 async function ejecutarDesactivarMulti() {
   const idMulti = document.getElementById('del-multi-id').value;
@@ -3392,15 +3700,20 @@ async function ejecutarDesactivarMulti() {
   }
 
   cerrarModal('modal-confirmar-eliminar-multi');
-  showToast('Multiimplantación finalizada correctamente.', 'success');
+  showToast('Multiimplantación desactivada / ocultada correctamente.', 'success');
   await loadAllData();
 }
 
 async function ejecutarEliminarFisicoMulti() {
+  if (!puedeEliminarDeBD()) {
+    showToast('Permiso denegado: Solo el Administrador y los Responsables pueden eliminar registros de la base de datos.', 'error');
+    return;
+  }
+
   const idMulti = document.getElementById('del-multi-id').value;
   if (!idMulti || !AppState.supabase) return;
 
-  if (!confirm('¿CONFIRMAS EL BORRADO DEFINITIVO? Esta acción eliminará permanentemente la multiimplantación y sus productos asociados.')) {
+  if (!confirm('¿CONFIRMAS EL BORRADO DEFINITIVO DE LA BASE DE DATOS? Esta acción eliminará permanentemente la multiimplantación y sus productos asociados.')) {
     return;
   }
 
@@ -3410,12 +3723,12 @@ async function ejecutarEliminarFisicoMulti() {
     .eq('id_multiimplantacion', idMulti);
 
   if (error) {
-    showToast(`Error al eliminar: ${error.message}`, 'error');
+    showToast(`Error al eliminar de la base de datos: ${error.message}`, 'error');
     return;
   }
 
   cerrarModal('modal-confirmar-eliminar-multi');
-  showToast('Multiimplantación eliminada correctamente.', 'success');
+  showToast('Multiimplantación eliminada definitivamente de la base de datos.', 'success');
   await loadAllData();
 }
 
@@ -4101,68 +4414,443 @@ function asignarSemanaActualVenta() {
   showToast(`Semana ${semana} de ${anio} asignada.`, 'info');
 }
 
-// Renderizado de tabla de ventas con buscador y filtro por año (Recomendación 2)
-function renderVentasTable() {
-  const tbody = document.getElementById('tabla-ventas-body');
-  const filterText = (document.getElementById('filter-ventas-text')?.value || '').toLowerCase().trim();
-  const filterAnio = document.getElementById('filter-ventas-anio')?.value || 'todos';
+// ------------------------------------------------------------------------------
+// GESTIÓN Y ORGANIZACIÓN DEL HISTORIAL DE VENTAS (Modo Consolidado y Detallado)
+// ------------------------------------------------------------------------------
 
-  if (!tbody) return;
+function cambiarModoVistaVentas(modo) {
+  AppState.vistaVentasModo = modo;
+  AppState.ventasPaginaActual = 1;
 
-  // Actualizar selector de años disponibles
-  const selectAnio = document.getElementById('filter-ventas-anio');
-  if (selectAnio && selectAnio.options.length <= 1) {
-    const aniosDisponibles = [...new Set(AppState.data.ventas_semanales.map(v => getVentaAnio(v)))].sort((a, b) => b - a);
+  const btnCons = document.getElementById('btn-vista-ventas-consolidado');
+  const btnDet = document.getElementById('btn-vista-ventas-detallado');
+
+  if (btnCons && btnDet) {
+    if (modo === 'consolidado') {
+      btnCons.className = 'px-3 py-1.5 font-bold rounded-lg transition flex items-center gap-1.5 bg-white text-sky-800 shadow-xs';
+      btnDet.className = 'px-3 py-1.5 font-semibold text-slate-600 hover:text-slate-900 rounded-lg transition flex items-center gap-1.5';
+    } else {
+      btnDet.className = 'px-3 py-1.5 font-bold rounded-lg transition flex items-center gap-1.5 bg-white text-sky-800 shadow-xs';
+      btnCons.className = 'px-3 py-1.5 font-semibold text-slate-600 hover:text-slate-900 rounded-lg transition flex items-center gap-1.5';
+    }
+  }
+
+  renderVentasTable();
+}
+
+function onCambiarAnioVentas() {
+  const selAnio = document.getElementById('filter-ventas-anio');
+  const selSemana = document.getElementById('filter-ventas-semana');
+  const currentYearVal = selAnio ? selAnio.value : 'todos';
+
+  let ventasParaSemanas = AppState.data.ventas_semanales;
+  if (currentYearVal !== 'todos') {
+    ventasParaSemanas = ventasParaSemanas.filter(v => String(getVentaAnio(v)) === String(currentYearVal));
+  }
+  const semanasDisponibles = [...new Set(ventasParaSemanas.map(v => Number(v.semana)))].filter(n => !isNaN(n) && n > 0).sort((a, b) => a - b);
+
+  if (selSemana) {
+    const semanaPrevia = selSemana.value;
+    selSemana.innerHTML = '<option value="todos">Todas las semanas</option>';
+    semanasDisponibles.forEach(s => {
+      const opt = document.createElement('option');
+      opt.value = s;
+      opt.textContent = `Semana ${s}`;
+      selSemana.appendChild(opt);
+    });
+    if (semanasDisponibles.map(String).includes(String(semanaPrevia))) {
+      selSemana.value = semanaPrevia;
+    } else {
+      selSemana.value = 'todos';
+    }
+  }
+
+  AppState.ventasPaginaActual = 1;
+  renderVentasTable();
+}
+
+function onCambiarFiltroVentas() {
+  AppState.ventasPaginaActual = 1;
+  renderVentasTable();
+}
+
+function limpiarFiltrosVentas() {
+  const fText = document.getElementById('filter-ventas-text');
+  const fAnio = document.getElementById('filter-ventas-anio');
+  const fSemana = document.getElementById('filter-ventas-semana');
+  const fCat = document.getElementById('filter-ventas-categoria');
+
+  if (fText) fText.value = '';
+  if (fAnio) fAnio.value = 'todos';
+  actualizarSelectoresFiltroVentas();
+  if (fSemana) fSemana.value = 'todos';
+  if (fCat) fCat.value = 'todas';
+
+  AppState.ventasPaginaActual = 1;
+  renderVentasTable();
+}
+
+function cambiarPaginaVentas(delta) {
+  AppState.ventasPaginaActual = Math.max(1, AppState.ventasPaginaActual + delta);
+  renderVentasTable();
+}
+
+function actualizarSelectoresFiltroVentas() {
+  const selAnio = document.getElementById('filter-ventas-anio');
+  const selSemana = document.getElementById('filter-ventas-semana');
+  const selCat = document.getElementById('filter-ventas-categoria');
+
+  const anioActual = selAnio ? selAnio.value : 'todos';
+  const semanaActual = selSemana ? selSemana.value : 'todos';
+  const catActual = selCat ? selCat.value : 'todas';
+
+  // 1. Selector de Años
+  if (selAnio) {
+    const aniosDisponibles = [...new Set(AppState.data.ventas_semanales.map(v => getVentaAnio(v)))].filter(Boolean).sort((a, b) => b - a);
+    selAnio.innerHTML = '<option value="todos">Todos los años</option>';
     aniosDisponibles.forEach(a => {
       const opt = document.createElement('option');
       opt.value = a;
       opt.textContent = `Año ${a}`;
-      selectAnio.appendChild(opt);
+      selAnio.appendChild(opt);
     });
+    if (aniosDisponibles.map(String).includes(String(anioActual))) {
+      selAnio.value = anioActual;
+    } else {
+      selAnio.value = 'todos';
+    }
   }
 
-  tbody.innerHTML = '';
+  // 2. Selector de Semanas
+  if (selSemana) {
+    const currentYearVal = selAnio ? selAnio.value : 'todos';
+    let ventasParaSemanas = AppState.data.ventas_semanales;
+    if (currentYearVal !== 'todos') {
+      ventasParaSemanas = ventasParaSemanas.filter(v => String(getVentaAnio(v)) === String(currentYearVal));
+    }
+    const semanasDisponibles = [...new Set(ventasParaSemanas.map(v => Number(v.semana)))].filter(n => !isNaN(n) && n > 0).sort((a, b) => a - b);
+    selSemana.innerHTML = '<option value="todos">Todas las semanas</option>';
+    semanasDisponibles.forEach(s => {
+      const opt = document.createElement('option');
+      opt.value = s;
+      opt.textContent = `Semana ${s}`;
+      selSemana.appendChild(opt);
+    });
+    if (semanasDisponibles.map(String).includes(String(semanaActual))) {
+      selSemana.value = semanaActual;
+    } else {
+      selSemana.value = 'todos';
+    }
+  }
 
-  const list = AppState.data.ventas_semanales.filter(v => {
-    const p = AppState.data.productos.find(prod => prod.id_producto === v.id_producto);
+  // 3. Selector de Categorías
+  if (selCat) {
+    const categorias = [...new Set((AppState.data.productos || []).map(p => p.categoria).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+    selCat.innerHTML = '<option value="todas">Todas las categorías</option>';
+    categorias.forEach(c => {
+      const opt = document.createElement('option');
+      opt.value = c;
+      opt.textContent = c;
+      selCat.appendChild(opt);
+    });
+    if (categorias.includes(catActual)) {
+      selCat.value = catActual;
+    } else {
+      selCat.value = 'todas';
+    }
+  }
+}
+
+function cargarProductoParaVenta(idProducto) {
+  const sel = document.getElementById('venta-producto');
+  if (sel) {
+    sel.value = idProducto;
+    actualizarInfoProductoVenta();
+    const uInput = document.getElementById('venta-unidades');
+    if (uInput) {
+      uInput.focus();
+      uInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+    showToast('Producto preseleccionado en el registro.', 'info');
+  }
+}
+
+function renderVentasTable() {
+  const container = document.getElementById('contenedor-tabla-ventas');
+  if (!container) return;
+
+  const filterText = (document.getElementById('filter-ventas-text')?.value || '').toLowerCase().trim();
+  const filterAnio = document.getElementById('filter-ventas-anio')?.value || 'todos';
+  const filterSemana = document.getElementById('filter-ventas-semana')?.value || 'todos';
+  const filterCat = document.getElementById('filter-ventas-categoria')?.value || 'todas';
+
+  // Mapa de productos para consulta rápida O(1)
+  const prodsMap = new Map();
+  (AppState.data.productos || []).forEach(p => prodsMap.set(p.id_producto, p));
+
+  // Filtrado de ventas
+  const filteredVentas = AppState.data.ventas_semanales.filter(v => {
+    const p = prodsMap.get(v.id_producto);
     const prodNombre = (p?.nombre || '').toLowerCase();
     const prodRef = (p?.referencia || '').toLowerCase();
+    const prodCat = p?.categoria || 'Sin categoría';
 
     const coincideTexto = !filterText || prodNombre.includes(filterText) || prodRef.includes(filterText);
     const vAnio = getVentaAnio(v);
     const coincideAnio = (filterAnio === 'todos') || (String(vAnio) === String(filterAnio));
+    const coincideSemana = (filterSemana === 'todos') || (String(v.semana) === String(filterSemana));
+    const coincideCat = (filterCat === 'todas') || (prodCat === filterCat);
 
-    return coincideTexto && coincideAnio;
+    return coincideTexto && coincideAnio && coincideSemana && coincideCat;
   });
 
-  if (list.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="5" class="px-5 py-6 text-center text-slate-400">No se encontraron ventas que coincidan con los filtros.</td></tr>`;
+  // Cálculo de métricas y KPIs
+  let totalUds = 0;
+  const prodsWithSales = new Set();
+  const weeksRecorded = new Set();
+  const salesByProduct = {};
+
+  filteredVentas.forEach(v => {
+    const uds = Number(v.unidades_vendidas) || 0;
+    totalUds += uds;
+    prodsWithSales.add(v.id_producto);
+    weeksRecorded.add(`${getVentaAnio(v)}-S${v.semana}`);
+    salesByProduct[v.id_producto] = (salesByProduct[v.id_producto] || 0) + uds;
+  });
+
+  let topProdName = '—';
+  let topProdUds = 0;
+  for (const [pId, uds] of Object.entries(salesByProduct)) {
+    if (uds > topProdUds) {
+      topProdUds = uds;
+      const p = prodsMap.get(pId);
+      topProdName = p ? p.nombre : 'Producto';
+    }
+  }
+
+  // Actualizar KPIs en el DOM
+  const elTotUds = document.getElementById('kpi-ventas-total-uds');
+  const elProdsCount = document.getElementById('kpi-ventas-prods-count');
+  const elSemanasCount = document.getElementById('kpi-ventas-semanas-count');
+  const elTopProd = document.getElementById('kpi-ventas-top-prod');
+  const elTopUds = document.getElementById('kpi-ventas-top-uds');
+
+  if (elTotUds) elTotUds.textContent = `${totalUds.toLocaleString()} uds`;
+  if (elProdsCount) elProdsCount.textContent = prodsWithSales.size.toLocaleString();
+  if (elSemanasCount) elSemanasCount.textContent = weeksRecorded.size.toLocaleString();
+  if (elTopProd) {
+    elTopProd.textContent = topProdName;
+    elTopProd.title = topProdName;
+  }
+  if (elTopUds) elTopUds.textContent = topProdUds > 0 ? `${topProdUds.toLocaleString()} uds` : '0 uds';
+
+  // Si no hay resultados
+  if (filteredVentas.length === 0) {
+    container.innerHTML = `
+      <div class="py-12 flex flex-col items-center justify-center text-center text-slate-400">
+        <i data-lucide="package-search" class="w-10 h-10 mb-2 text-slate-300"></i>
+        <p class="font-bold text-slate-700 text-sm">No se encontraron ventas para los filtros actuales</p>
+        <p class="text-xs text-slate-400 mt-1">Prueba seleccionando otro período, categoría o borrando el término de búsqueda.</p>
+        <button type="button" onclick="limpiarFiltrosVentas()" class="mt-3 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg text-xs transition">
+          Restablecer filtros
+        </button>
+      </div>
+    `;
+    actualizarPaginacionVentas(0, 0, 0, 0);
+    if (window.lucide) lucide.createIcons();
     return;
   }
 
-  list.slice(0, 100).forEach(v => {
-    const p = AppState.data.productos.find(prod => prod.id_producto === v.id_producto);
-    const safeNombre = escapeHtml(p ? p.nombre : 'Producto');
-    const safeRef = escapeHtml(p?.referencia || '');
-    const vAnio = getVentaAnio(v);
-    const tr = document.createElement('tr');
-    tr.className = 'hover:bg-slate-50 border-b border-slate-200 transition-colors';
-    tr.innerHTML = `
-      <td class="px-5 py-3 font-medium text-slate-800">
-        <div>${safeNombre}</div>
-        <div class="text-[10px] text-slate-400 font-mono">${safeRef}</div>
-      </td>
-      <td class="px-4 py-3 text-center text-slate-600 font-semibold">Semana ${escapeHtml(v.semana)}</td>
-      <td class="px-4 py-3 text-center text-slate-600">${escapeHtml(vAnio)}</td>
-      <td class="px-4 py-3 text-right font-bold text-sky-700">${escapeHtml(v.unidades_vendidas)} uds</td>
-      <td class="px-4 py-3 text-right">
-        <button onclick="abrirEditarVenta('${escapeHtml(v.id_venta)}')" class="text-xs text-sky-700 hover:text-sky-900 font-semibold underline">
-          Editar
-        </button>
-      </td>
+  const modo = AppState.vistaVentasModo || 'consolidado';
+
+  if (modo === 'consolidado') {
+    // -------------------------------------------------------------
+    // VISTA CONSOLIDADA: Matriz Producto vs Semanas
+    // -------------------------------------------------------------
+    const productAgg = {};
+    const uniqueWeeks = [...new Set(filteredVentas.map(v => Number(v.semana)))].filter(n => !isNaN(n)).sort((a, b) => a - b);
+
+    filteredVentas.forEach(v => {
+      if (!productAgg[v.id_producto]) {
+        const p = prodsMap.get(v.id_producto);
+        productAgg[v.id_producto] = {
+          producto: p || { id_producto: v.id_producto, nombre: 'Producto sin catálogo', referencia: '', categoria: 'Sin categoría' },
+          totalUds: 0,
+          semanas: {}
+        };
+      }
+      const uds = Number(v.unidades_vendidas) || 0;
+      productAgg[v.id_producto].totalUds += uds;
+      productAgg[v.id_producto].semanas[v.semana] = v;
+    });
+
+    const productList = Object.values(productAgg).sort((a, b) => b.totalUds - a.totalUds);
+
+    const perPage = AppState.ventasPorPagina || 20;
+    const totalPages = Math.max(1, Math.ceil(productList.length / perPage));
+    if (AppState.ventasPaginaActual > totalPages) AppState.ventasPaginaActual = totalPages;
+    if (AppState.ventasPaginaActual < 1) AppState.ventasPaginaActual = 1;
+
+    const startIndex = (AppState.ventasPaginaActual - 1) * perPage;
+    const pageItems = productList.slice(startIndex, startIndex + perPage);
+
+    let html = `
+      <table class="w-full text-left text-xs whitespace-nowrap">
+        <thead>
+          <tr class="bg-slate-50 border-b border-slate-200 font-bold text-slate-600 uppercase tracking-wider text-[11px]">
+            <th class="px-4 py-2.5">Producto</th>
+            <th class="px-3 py-2.5">Categoría</th>
+            ${uniqueWeeks.map(s => `<th class="px-3 py-2.5 text-center bg-slate-100/60 text-slate-700">Sem ${s}</th>`).join('')}
+            <th class="px-4 py-2.5 text-right bg-sky-50 text-sky-800">Total Período</th>
+            <th class="px-3 py-2.5 text-center">Acción</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-100">
     `;
-    tbody.appendChild(tr);
-  });
+
+    pageItems.forEach(item => {
+      const p = item.producto;
+      const safeNombre = escapeHtml(p.nombre || 'Producto');
+      const safeRef = escapeHtml(p.referencia || '');
+      const safeCat = escapeHtml(p.categoria || 'Sin categoría');
+
+      html += `
+        <tr class="hover:bg-slate-50/80 border-b border-slate-100 transition-colors">
+          <td class="px-4 py-2.5 font-medium text-slate-800">
+            <div class="font-bold text-slate-900">${safeNombre}</div>
+            <div class="text-[10px] text-slate-400 font-mono">${safeRef}</div>
+          </td>
+          <td class="px-3 py-2.5 text-slate-600">
+            <span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-100 text-slate-700">${safeCat}</span>
+          </td>
+          ${uniqueWeeks.map(s => {
+            const v = item.semanas[s];
+            if (v) {
+              return `
+                <td class="px-3 py-2.5 text-center">
+                  <button type="button" onclick="abrirEditarVenta('${escapeHtml(v.id_venta)}')" 
+                    title="Editar venta Sem ${s} (${v.unidades_vendidas} uds)"
+                    class="px-2 py-0.5 bg-white hover:bg-sky-50 border border-slate-200 hover:border-sky-300 rounded font-bold text-sky-800 text-xs transition shadow-2xs">
+                    ${escapeHtml(v.unidades_vendidas)}
+                  </button>
+                </td>
+              `;
+            } else {
+              return `<td class="px-3 py-2.5 text-center text-slate-300 font-mono text-xs">-</td>`;
+            }
+          }).join('')}
+          <td class="px-4 py-2.5 text-right font-black text-sky-700 bg-sky-50/40 text-xs">
+            ${item.totalUds.toLocaleString()} uds
+          </td>
+          <td class="px-3 py-2.5 text-center">
+            <button type="button" onclick="cargarProductoParaVenta('${escapeHtml(p.id_producto)}')"
+              class="px-2 py-1 rounded bg-slate-100 hover:bg-sky-100 text-slate-700 hover:text-sky-800 font-bold text-[11px] transition inline-flex items-center gap-1" 
+              title="Registrar nueva venta para este producto">
+              <i data-lucide="plus" class="w-3 h-3"></i>
+              <span>Venta</span>
+            </button>
+          </td>
+        </tr>
+      `;
+    });
+
+    html += `</tbody></table>`;
+    container.innerHTML = html;
+
+    actualizarPaginacionVentas(startIndex, pageItems.length, productList.length, totalPages, 'productos');
+
+  } else {
+    // -------------------------------------------------------------
+    // VISTA DETALLADA: Registros individuales paginados
+    // -------------------------------------------------------------
+    const sortedList = [...filteredVentas].sort((a, b) => {
+      const aAnio = Number(getVentaAnio(a)) || 0;
+      const bAnio = Number(getVentaAnio(b)) || 0;
+      if (bAnio !== aAnio) return bAnio - aAnio;
+      if (Number(b.semana) !== Number(a.semana)) return Number(b.semana) - Number(a.semana);
+      return (Number(b.unidades_vendidas) || 0) - (Number(a.unidades_vendidas) || 0);
+    });
+
+    const perPage = 25;
+    const totalPages = Math.max(1, Math.ceil(sortedList.length / perPage));
+    if (AppState.ventasPaginaActual > totalPages) AppState.ventasPaginaActual = totalPages;
+    if (AppState.ventasPaginaActual < 1) AppState.ventasPaginaActual = 1;
+
+    const startIndex = (AppState.ventasPaginaActual - 1) * perPage;
+    const pageItems = sortedList.slice(startIndex, startIndex + perPage);
+
+    let html = `
+      <table class="w-full text-left text-xs whitespace-nowrap">
+        <thead>
+          <tr class="bg-slate-50 border-b border-slate-200 font-bold text-slate-600 uppercase tracking-wider text-[11px]">
+            <th class="px-4 py-2.5">Producto</th>
+            <th class="px-3 py-2.5">Categoría</th>
+            <th class="px-3 py-2.5 text-center">Semana</th>
+            <th class="px-3 py-2.5 text-center">Año</th>
+            <th class="px-4 py-2.5 text-right font-bold text-sky-800">Unidades Vendidas</th>
+            <th class="px-3 py-2.5 text-right">Acción</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-100">
+    `;
+
+    pageItems.forEach(v => {
+      const p = prodsMap.get(v.id_producto);
+      const safeNombre = escapeHtml(p ? p.nombre : 'Producto');
+      const safeRef = escapeHtml(p?.referencia || '');
+      const safeCat = escapeHtml(p?.categoria || 'Sin categoría');
+      const vAnio = getVentaAnio(v);
+
+      html += `
+        <tr class="hover:bg-slate-50 border-b border-slate-100 transition-colors">
+          <td class="px-4 py-2.5 font-medium text-slate-800">
+            <div class="font-bold text-slate-900">${safeNombre}</div>
+            <div class="text-[10px] text-slate-400 font-mono">${safeRef}</div>
+          </td>
+          <td class="px-3 py-2.5 text-slate-600">
+            <span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-100 text-slate-700">${safeCat}</span>
+          </td>
+          <td class="px-3 py-2.5 text-center text-slate-700 font-bold">Semana ${escapeHtml(v.semana)}</td>
+          <td class="px-3 py-2.5 text-center text-slate-600">${escapeHtml(vAnio)}</td>
+          <td class="px-4 py-2.5 text-right font-black text-sky-700 text-xs">${escapeHtml(v.unidades_vendidas)} uds</td>
+          <td class="px-3 py-2.5 text-right">
+            <button onclick="abrirEditarVenta('${escapeHtml(v.id_venta)}')" class="text-xs text-sky-700 hover:text-sky-900 font-bold underline">
+              Editar
+            </button>
+          </td>
+        </tr>
+      `;
+    });
+
+    html += `</tbody></table>`;
+    container.innerHTML = html;
+
+    actualizarPaginacionVentas(startIndex, pageItems.length, sortedList.length, totalPages, 'registros');
+  }
+
+  if (window.lucide) lucide.createIcons();
+}
+
+function actualizarPaginacionVentas(startIndex, count, totalItems, totalPages, label = 'registros') {
+  const infoEl = document.getElementById('info-paginacion-ventas');
+  const badgePag = document.getElementById('badge-pagina-actual-ventas');
+  const btnAnt = document.getElementById('btn-pag-ant-ventas');
+  const btnSig = document.getElementById('btn-pag-sig-ventas');
+
+  if (totalItems === 0) {
+    if (infoEl) infoEl.textContent = 'Mostrando 0 de 0 registros';
+    if (badgePag) badgePag.textContent = 'Pág. 1 de 1';
+    if (btnAnt) btnAnt.disabled = true;
+    if (btnSig) btnSig.disabled = true;
+    return;
+  }
+
+  const start = startIndex + 1;
+  const end = startIndex + count;
+  if (infoEl) infoEl.textContent = `Mostrando ${start} - ${end} de ${totalItems} ${label}`;
+  if (badgePag) badgePag.textContent = `Pág. ${AppState.ventasPaginaActual} de ${totalPages}`;
+  if (btnAnt) btnAnt.disabled = AppState.ventasPaginaActual <= 1;
+  if (btnSig) btnSig.disabled = AppState.ventasPaginaActual >= totalPages;
 }
 
 function abrirEditarVenta(idVenta) {
@@ -4187,7 +4875,52 @@ function abrirEditarVenta(idVenta) {
   document.getElementById('edit-venta-anio').value = getVentaAnio(v);
   document.getElementById('edit-venta-unidades').value = v.unidades_vendidas;
 
+  // Botón eliminar venta: visible solo para Admin y Responsables
+  const btnDel = document.getElementById('btn-del-venta');
+  if (btnDel) {
+    if (puedeEliminarDeBD()) {
+      btnDel.classList.remove('hidden');
+    } else {
+      btnDel.classList.add('hidden');
+    }
+  }
+
   abrirModal('modal-editar-venta');
+}
+
+async function ejecutarEliminarVentaModal() {
+  if (!puedeEliminarDeBD()) {
+    showToast('Solo Administradores y Responsables pueden eliminar ventas de la base de datos.', 'error');
+    return;
+  }
+  const idVenta = document.getElementById('edit-venta-id')?.value;
+  if (!idVenta) return;
+
+  const v = AppState.data.ventas_semanales.find(item => item.id_venta === idVenta);
+  const prod = v ? AppState.data.productos.find(p => p.id_producto === v.id_producto) : null;
+  const prodName = prod ? prod.nombre : 'este producto';
+
+  const confirmar = confirm(`¿Estás seguro de eliminar permanentemente la venta de "${prodName}" (Semana ${v?.semana} - ${v?.unidades_vendidas} uds)? Esta acción no se puede deshacer.`);
+  if (!confirmar) return;
+
+  if (!AppState.supabase) {
+    showToast('Supabase no conectado.', 'warning');
+    return;
+  }
+
+  const { error } = await AppState.supabase
+    .from('venta_semanal')
+    .delete()
+    .eq('id_venta', idVenta);
+
+  if (error) {
+    showToast(`Error al eliminar registro de venta: ${error.message}`, 'error');
+    return;
+  }
+
+  cerrarModal('modal-editar-venta');
+  showToast('Registro de venta eliminado de la base de datos.', 'success');
+  await loadAllData();
 }
 
 async function guardarEditarVenta(e) {
@@ -4317,4 +5050,11 @@ window.addEventListener('DOMContentLoaded', () => {
   const filterSelect = document.getElementById('filter-multi-estado');
   if (filterInput) filterInput.addEventListener('input', renderMultiimplantacionesTable);
   if (filterSelect) filterSelect.addEventListener('change', renderMultiimplantacionesTable);
+
+  // Detector informativo para la tecla F7 (Navegación con cursor en Chrome/Edge)
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'F7') {
+      showToast('Presionaste F7: Alterna la navegación con cursor de texto en tu navegador.', 'info');
+    }
+  });
 });
