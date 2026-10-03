@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Decathlon La Flora — Dashboard Ejecutivo Sep 2026</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Inter', sans-serif; background-color: #f8fafc; color: #0f172a; }
+    .card {
+      background: #ffffff;
+      border-radius: 1.25rem;
+      box-shadow: 0 4px 20px -2px rgba(15, 23, 42, 0.05);
+      border: 1px solid #e2e8f0;
+    }
+    .nav-tab.active {
+      background-color: #3643ba;
+      color: #ffffff;
+      box-shadow: 0 4px 14px rgba(54, 67, 186, 0.35);
+    }
+    .mode-pill.active {
+      background-color: #0f172a;
+      color: #ffffff;
+    }
+    .tab-panel { display: none; animation: fadeIn 0.25s ease-out; }
+    .tab-panel.active { display: block; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+  </style>
+</head>
+<body class="min-h-screen pb-12">
+
+  <!-- BARRA SUPERIOR MINIMALISTA -->
+  <header class="bg-white border-b border-slate-200 sticky top-0 z-50">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6 py-3.5 flex flex-col sm:flex-row items-center justify-between gap-3">
+      <div class="flex items-center gap-3">
+        <span class="bg-[#3643ba] text-white font-black text-xl px-3 py-1 rounded-lg tracking-tighter">DECATHLON</span>
+        <div>
+          <h1 class="text-base font-extrabold text-slate-900 leading-none">LA FLORA • SEPTIEMBRE 2026</h1>
+          <span class="text-xs text-slate-500 font-medium">Informe Ejecutivo Visual • Multiimplantación en Lineal, Nariz de Caja y Cabeceras</span>
+        </div>
+      </div>
+
+      <!-- NAVEGACIÓN POR PESTAÑAS -->
+      <nav class="flex items-center gap-1.5 bg-slate-100 p-1.5 rounded-xl overflow-x-auto max-w-full">
+        <button onclick="switchTab(1)" id="tab-btn-1" class="nav-tab active text-xs font-bold px-3.5 py-2 rounded-lg transition whitespace-nowrap">
+          1. Cierre General
+        </button>
+        <button onclick="switchTab(2)" id="tab-btn-2" class="nav-tab text-slate-600 hover:text-slate-900 text-xs font-bold px-3.5 py-2 rounded-lg transition whitespace-nowrap">
+          2. Artículos / Ticket
+        </button>
+        <button onclick="switchTab(3)" id="tab-btn-3" class="nav-tab text-slate-600 hover:text-slate-900 text-xs font-bold px-3.5 py-2 rounded-lg transition whitespace-nowrap">
+          3. Multiimplantación
+        </button>
+        <button onclick="switchTab(4)" id="tab-btn-4" class="nav-tab text-slate-600 hover:text-slate-900 text-xs font-bold px-3.5 py-2 rounded-lg transition whitespace-nowrap">
+          4. Aciertos y Octubre
+        </button>
+      </nav>
+    </div>
+  </header>
+
+  <main class="max-w-6xl mx-auto px-4 sm:px-6 mt-6">
+
+    <!-- ==========================================
+         PESTAÑA 1: CIERRE GENERAL Y COLOMBIA
+         ========================================== -->
+    <div id="panel-1" class="tab-panel active space-y-6">
+      
+      <!-- Selector rápido de comparativa -->
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-white px-5 py-3 rounded-2xl border border-slate-200">
+        <span class="text-xs font-bold uppercase tracking-wider text-slate-500" id="subtitle-mode">
+          Comparando: Septiembre 2026 vs. Septiembre 2025
+        </span>
+        <div class="flex flex-wrap gap-1.5">
+          <button onclick="updateKpis('yoy')" id="pill-yoy" class="mode-pill active text-xs font-bold px-3 py-1 rounded-lg bg-slate-100 text-slate-700 transition">Vs. Sep 2025</button>
+          <button onclick="updateKpis('col')" id="pill-col" class="mode-pill text-xs font-bold px-3 py-1 rounded-lg bg-slate-100 text-slate-700 transition">Vs. Colombia</button>
+          <button onclick="updateKpis('mom')" id="pill-mom" class="mode-pill text-xs font-bold px-3 py-1 rounded-lg bg-slate-100 text-slate-700 transition">Vs. Agosto 2026</button>
+          <button onclick="updateKpis('quin')" id="pill-quin" class="mode-pill text-xs font-bold px-3 py-1 rounded-lg bg-slate-100 text-slate-700 transition">2.ª vs. 1.ª Quincena</button>
+        </div>
+      </div>
+
+      <!-- 5 KPIs Gigantes y Limpios -->
+      <div class="grid grid-cols-2 lg:grid-cols-5 gap-4" id="kpi-container"></div>
+
+      <!-- 2 Gráficos Principales -->
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        <div class="card p-6 lg:col-span-6">
+          <span class="text-[11px] font-extrabold uppercase text-indigo-600 tracking-wider">Crecimiento Interanual (Sep 26 vs. Sep 25)</span>
+          <h3 class="text-base font-extrabold text-slate-900 mt-0.5 mb-4">La Flora multiplicó por 6,8x el crecimiento de Colombia</h3>
+          <div class="h-64">
+            <canvas id="chartColVsFlora"></canvas>
+          </div>
+        </div>
+
+        <div class="card p-6 lg:col-span-6">
+          <span class="text-[11px] font-extrabold uppercase text-emerald-600 tracking-wider">Salto del 7.° puesto (Ago) al 2.° puesto (Sep)</span>
+          <h3 class="text-base font-extrabold text-slate-900 mt-0.5 mb-4">Top Tiendas en Tasa de Conversión (Septiembre 2026)</h3>
+          <div class="h-64">
+            <canvas id="chartRanking"></canvas>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==========================================
+         PESTAÑA 2: FOCO ARTÍCULOS POR TICKET Y PRECIO
+         ========================================== -->
+    <div id="panel-2" class="tab-panel space-y-6">
+
+      <!-- 3 Tarjetas de Conclusión Directa -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div class="card p-5 border-l-4 border-l-indigo-600">
+          <span class="text-xs font-bold text-slate-400 uppercase">Artículos por Cliente</span>
+          <div class="text-3xl font-black text-slate-900 mt-1">2,5 → 2,7 <span class="text-base text-emerald-600 font-extrabold">(+8,0%)</span></div>
+          <p class="text-xs text-slate-600 mt-1">Mayor crecimiento del año en La Flora mientras Colombia se quedó en <strong>2,5 (-0,3%)</strong>.</p>
+        </div>
+        <div class="card p-5 border-l-4 border-l-emerald-500">
+          <span class="text-xs font-bold text-slate-400 uppercase">Precio Medio por Artículo</span>
+          <div class="text-3xl font-black text-slate-900 mt-1">$64.001 <span class="text-base text-emerald-600 font-extrabold">(+4,8%)</span></div>
+          <p class="text-xs text-slate-600 mt-1">Sube <strong>+$2.946 vs. 2025</strong> y se mantiene estable frente a agosto ($64.311) sin regalar margen.</p>
+        </div>
+        <div class="card p-5 border-l-4 border-l-amber-500">
+          <span class="text-xs font-bold text-slate-400 uppercase">Efecto en Cesta Media</span>
+          <div class="text-3xl font-black text-slate-900 mt-1">$172.135 <span class="text-base text-emerald-600 font-extrabold">(+13,2%)</span></div>
+          <p class="text-xs text-slate-600 mt-1">El <strong>2,7 en unidades</strong> permitió superar la cesta de Colombia ($167.346) por <strong>+$4.789</strong>.</p>
+        </div>
+      </div>
+
+      <!-- 2 Gráficos de Artículos/Ticket y Precio Medio -->
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        <div class="card p-6 lg:col-span-7">
+          <div class="flex items-center justify-between mb-3">
+            <div>
+              <span class="text-[11px] font-extrabold uppercase text-indigo-600">Evolutivo Mensual 2025 vs. 2026</span>
+              <h3 class="text-base font-extrabold text-slate-900">Despegue sostenido en 2,7 desde Julio hasta Septiembre</h3>
+            </div>
+            <span class="bg-emerald-100 text-emerald-800 text-xs font-extrabold px-2.5 py-1 rounded-full">Sep: +8,0% YoY</span>
+          </div>
+          <div class="h-64">
+            <canvas id="chartUptLine"></canvas>
+          </div>
+        </div>
+
+        <div class="card p-6 lg:col-span-5">
+          <span class="text-[11px] font-extrabold uppercase text-emerald-600">Cesta Media vs. Precio Unitario</span>
+          <h3 class="text-base font-extrabold text-slate-900 mb-3">Comparativa de Valor ($ COP)</h3>
+          <div class="h-64">
+            <canvas id="chartPriceBasket"></canvas>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==========================================
+         PESTAÑA 3: EVIDENCIA MULTIIMPLANTACIÓN
+         ========================================== -->
+    <div id="panel-3" class="tab-panel space-y-6">
+
+      <!-- Nota aclaratoria del modelo de implantación en La Flora -->
+      <div class="bg-indigo-50 border border-indigo-200 rounded-2xl px-5 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+        <div class="flex items-center gap-2.5">
+          <span class="bg-[#3643ba] text-white text-xs font-black px-2.5 py-1 rounded-md">ESTRATEGIA EN TIENDA</span>
+          <p class="text-xs text-slate-700 font-medium">
+            En <strong>La Flora</strong>, las acciones de <strong>Multiimplantación</strong> se ubican estratégicamente en <strong>el propio Lineal (venta cruzada junto al producto principal), en Nariz de Caja (Atención al Cliente) y en Cabeceras</strong>.
+          </p>
+        </div>
+      </div>
+
+      <!-- 3 KPIs de Impacto de Multiimplantación -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div class="card p-5 bg-indigo-950 text-white">
+          <span class="text-xs font-bold text-indigo-200 uppercase">Peso en Ventas (Sem. 21–27 Sep)</span>
+          <div class="text-3xl font-black text-emerald-400 mt-1">71,8% de Unidades</div>
+          <p class="text-xs text-indigo-100 mt-1"><strong>349 de 486 unidades</strong> del Top salieron de referencias con <strong>Multiimplantación</strong> (en lineal, nariz de caja o cabecera).</p>
+        </div>
+        <div class="card p-5">
+          <span class="text-xs font-bold text-slate-400 uppercase">Velocidad de Rotación Semanal</span>
+          <div class="text-3xl font-black text-[#3643ba] mt-1">2,8x más rápido</div>
+          <p class="text-xs text-slate-600 mt-1"><strong>10,9 uds/referencia</strong> en Multiimplantación vs. <strong>3,9 uds/referencia</strong> con ubicación única (Lineal Estándar).</p>
+        </div>
+        <div class="card p-5">
+          <span class="text-xs font-bold text-slate-400 uppercase">Aceleración (Sem. B vs. Sem. A)</span>
+          <div class="text-3xl font-black text-emerald-600 mt-1">+31,7% (+117 uds)</div>
+          <p class="text-xs text-slate-600 mt-1">Subió de <strong>369 uds</strong> (14–20 Sep) a <strong>486 uds</strong> (21–27 Sep), sosteniendo el 2,7 en la 2.ª quincena.</p>
+        </div>
+      </div>
+
+      <!-- Gráficos Multiimplantación -->
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        <div class="card p-6 lg:col-span-7">
+          <span class="text-[11px] font-extrabold uppercase text-indigo-600">Auditoría por Deporte (Semana 21–27 Sep)</span>
+          <h3 class="text-base font-extrabold text-slate-900 mb-4">Unidades "En Multi" (Lineal Cruzado / Nariz de Caja / Cabecera) vs. "Ubicación Única"</h3>
+          <div class="h-64">
+            <canvas id="chartMultiStack"></canvas>
+          </div>
+        </div>
+
+        <!-- Top 6 Productos Ganadores en Multi -->
+        <div class="card p-6 lg:col-span-5 flex flex-col justify-between">
+          <div>
+            <span class="text-[11px] font-extrabold uppercase text-emerald-600">El #1 de cada deporte estuvo en Multiimplantación</span>
+            <h3 class="text-base font-extrabold text-slate-900 mb-3">Top 6 Productos "En Multi" (14–27 Sep)</h3>
+            <div class="space-y-2.5">
+              <div class="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 border border-slate-100">
+                <div>
+                  <span class="text-xs font-extrabold text-slate-900 block">1. Silbato Plástico (Colectivos)</span>
+                  <span class="text-[11px] text-slate-500">62% de su categoría • Sem A: 59 → Sem B: 65</span>
+                </div>
+                <span class="text-sm font-black text-indigo-700 bg-indigo-50 px-2.5 py-1 rounded-lg">124 uds</span>
+              </div>
+              <div class="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 border border-slate-100">
+                <div>
+                  <span class="text-xs font-extrabold text-slate-900 block">2. Toallas Microfibra Bicolor + Nero (Agua)</span>
+                  <span class="text-[11px] text-slate-500">70% de su categoría • Sem A: 55 → Sem B: 49</span>
+                </div>
+                <span class="text-sm font-black text-indigo-700 bg-indigo-50 px-2.5 py-1 rounded-lg">104 uds</span>
+              </div>
+              <div class="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 border border-slate-100">
+                <div>
+                  <span class="text-xs font-extrabold text-slate-900 block">3. Bandas Mini Pilates x3 (Fitness)</span>
+                  <span class="text-[11px] text-slate-500">44% de su categoría • Sem A: 47 → Sem B: 44</span>
+                </div>
+                <span class="text-sm font-black text-indigo-700 bg-indigo-50 px-2.5 py-1 rounded-lg">91 uds</span>
+              </div>
+              <div class="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 border border-slate-100">
+                <div>
+                  <span class="text-xs font-extrabold text-slate-900 block">4. Caramañola MH100 0.8L (Montaña)</span>
+                  <span class="text-[11px] text-slate-500">Creció +45% • Sem A: 20 → Sem B: 29</span>
+                </div>
+                <span class="text-sm font-black text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-lg">49 uds</span>
+              </div>
+              <div class="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 border border-slate-100">
+                <div>
+                  <span class="text-xs font-extrabold text-slate-900 block">5. Medias Run500 Invisibles x2 (Running)</span>
+                  <span class="text-[11px] text-slate-500">#1 en Running • Sem A: 24 → Sem B: 15</span>
+                </div>
+                <span class="text-sm font-black text-indigo-700 bg-indigo-50 px-2.5 py-1 rounded-lg">39 uds</span>
+              </div>
+              <div class="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 border border-slate-100">
+                <div>
+                  <span class="text-xs font-extrabold text-slate-900 block">6. Sombrero Hike 100 + Gafas/Shampoo (Nariz Caja)</span>
+                  <span class="text-[11px] text-slate-500">72% de Atención al Cliente en Multi • Creció +45%</span>
+                </div>
+                <span class="text-sm font-black text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-lg">41 uds</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==========================================
+         PESTAÑA 4: ACIERTOS Y FOCO OCTUBRE
+         ========================================== -->
+    <div id="panel-4" class="tab-panel space-y-6">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        
+        <!-- 3 Aciertos Clave -->
+        <div class="card p-6 border-t-4 border-t-emerald-500 space-y-4">
+          <div class="flex items-center gap-2.5">
+            <span class="w-7 h-7 rounded-lg bg-emerald-100 text-emerald-700 font-black flex items-center justify-center">✓</span>
+            <h3 class="text-base font-extrabold text-slate-900 uppercase">3 Grandes Aciertos de Septiembre</h3>
+          </div>
+
+          <div class="p-4 rounded-xl bg-slate-50">
+            <h4 class="text-sm font-extrabold text-slate-900">1. Conversión récord (35,6%) que disparó los tickets (+17,3%)</h4>
+            <p class="text-xs text-slate-600 mt-1">Con casi el mismo tráfico de 2025 (+1,95%), la tienda sumó <strong>+1.137 compradores nuevos</strong> y escaló al <strong>2.° puesto nacional</strong>.</p>
+          </div>
+
+          <div class="p-4 rounded-xl bg-slate-50">
+            <h4 class="text-sm font-extrabold text-slate-900">2. Salto a 2,7 Artículos/Ticket (+8,0%) sin sacrificar Precio Medio</h4>
+            <p class="text-xs text-slate-600 mt-1">Se vendieron <strong>~20.726 unidades físicas (+26,7% vs. 2025)</strong> manteniendo un precio medio sano de <strong>$64.001 (+4,8%)</strong>.</p>
+          </div>
+
+          <div class="p-4 rounded-xl bg-slate-50">
+            <h4 class="text-sm font-extrabold text-slate-900">3. Ejecución de Multiimplantaciones en Lineal, Nariz de Caja y Cabecera</h4>
+            <p class="text-xs text-slate-600 mt-1">Aportaron el <strong>71,8% del volumen Top</strong> (destacando Montaña +87%, Running +64%, Colectivos +54% y Nariz de Caja/Atención al Cliente +45%).</p>
+          </div>
+        </div>
+
+        <!-- 3 Oportunidades Tácticas Octubre -->
+        <div class="card p-6 border-t-4 border-t-amber-500 space-y-4">
+          <div class="flex items-center gap-2.5">
+            <span class="w-7 h-7 rounded-lg bg-amber-100 text-amber-700 font-black flex items-center justify-center">⚡</span>
+            <h3 class="text-base font-extrabold text-slate-900 uppercase">3 Acciones Inmediatas para Octubre</h3>
+          </div>
+
+          <div class="p-4 rounded-xl bg-amber-50/60 border border-amber-200/60">
+            <h4 class="text-sm font-extrabold text-slate-900">1. Activar Multiimplantaciones Cruzadas en Ciclismo (0% actual)</h4>
+            <p class="text-xs text-slate-600 mt-1">Ciclismo fue el único deporte con <strong>0 productos en Multi</strong> (solo 7 uds en ubicación estándar). Implantar accesorios cruzados en su lineal o en nariz de caja sumará unidades rápidas.</p>
+          </div>
+
+          <div class="p-4 rounded-xl bg-amber-50/60 border border-amber-200/60">
+            <h4 class="text-sm font-extrabold text-slate-900">2. Multiimplantar los Soft Flasks y rotar 2 referencias en cero</h4>
+            <p class="text-xs text-slate-600 mt-1">Los <em>Soft Flasks 250/500ml</em> vendieron <strong>21 uds en lineal estándar</strong>; llevarlos a multiimplantación en el lineal de textil/calzado running o nariz de caja multiplicará su rotación. Rotar la <em>Caramañola Soft Flow</em> y el <em>Lifting Glove Green</em> (<strong>0 uds en Multi</strong>).</p>
+          </div>
+
+          <div class="p-4 rounded-xl bg-amber-50/60 border border-amber-200/60">
+            <h4 class="text-sm font-extrabold text-slate-900">3. Revertir el arranque de Octubre (-9,4% en S40)</h4>
+            <p class="text-xs text-slate-600 mt-1">Octubre 2025 tuvo una base alta (2,65 art/ticket). La conversión ya está en <strong>35,66%</strong>; potenciar el impulso en <strong>Nariz de Caja y Lineal Cruzado</strong> defenderá el 2,7.</p>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+  </main>
+
+  <script>
+    // NAVEGACIÓN ENTRE PESTAÑAS
+    function switchTab(num) {
+      document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+      document.querySelectorAll('.nav-tab').forEach(b => {
+        b.classList.remove('active');
+        b.classList.add('text-slate-600');
+      });
+      document.getElementById('panel-' + num).classList.add('active');
+      const btn = document.getElementById('tab-btn-' + num);
+      btn.classList.add('active');
+      btn.classList.remove('text-slate-600');
+    }
+
+    // DATOS SIMPLIFICADOS (5 KPIs ESENCIALES)
+    const kpiData = {
+      yoy: {
+        subtitle: "Comparando: Septiembre 2026 vs. Septiembre 2025 (Crecimiento Interanual)",
+        items: [
+          { name: "Ventas", val: "$1.326M", sub: "2025: $999M", badge: "+32,8%", ok: true },
+          { name: "Tickets", val: "7.705", sub: "2025: 6.568", badge: "+17,31%", ok: true },
+          { name: "Artículos / Ticket", val: "2,7", sub: "2025: 2,5", badge: "+8,0%", ok: true, focus: true },
+          { name: "Precio Medio", val: "$64.001", sub: "2025: $61.055", badge: "+4,8%", ok: true },
+          { name: "Conversión", val: "35,6%", sub: "2025: 30,9%", badge: "+4,7 pp", ok: true }
+        ]
+      },
+      col: {
+        subtitle: "Comparando: La Flora vs. Promedio Nacional Colombia (Septiembre 2026)",
+        items: [
+          { name: "Ventas", val: "$1.326M", sub: "País creció +4,8%", badge: "+32,8% Flora", ok: true },
+          { name: "Cesta Media", val: "$172.135", sub: "País: $167.346", badge: "+$4.789 vs País", ok: true },
+          { name: "Artículos / Ticket", val: "2,7", sub: "País: 2,5 (-0,3%)", badge: "+0,2 art. vs País", ok: true, focus: true },
+          { name: "Precio Medio", val: "$64.001", sub: "País: $66.230", badge: "-3,4% vs País", ok: false },
+          { name: "Conversión", val: "35,6%", sub: "País: 29,03%", badge: "Top #2 País", ok: true }
+        ]
+      },
+      mom: {
+        subtitle: "Comparando: Septiembre 2026 vs. Agosto 2026 (Evolución Mensual)",
+        items: [
+          { name: "Ventas", val: "$1.326M", sub: "Ago: $1.082M", badge: "+22,6%", ok: true },
+          { name: "Tickets", val: "7.705", sub: "Ago: 6.152", badge: "+25,2%", ok: true },
+          { name: "Artículos / Ticket", val: "2,7", sub: "Ago: 2,7 (2,74 → 2,69)", badge: "Estable en 2,7", ok: true, focus: true },
+          { name: "Precio Medio", val: "$64.001", sub: "Ago: $64.311", badge: "-0,48%", ok: true },
+          { name: "Conversión", val: "35,6%", sub: "Ago: 29,4% (7.° país)", badge: "+6,2 pp (2.° país)", ok: true }
+        ]
+      },
+      quin: {
+        subtitle: "Comparando: 2.ª Quincena (15–30 Sep) vs. 1.ª Quincena (1–14 Sep 2026)",
+        items: [
+          { name: "Ventas", val: "$685M", sub: "1.ª Quin: $641M", badge: "+6,8%", ok: true },
+          { name: "Tickets", val: "4.060", sub: "1.ª Quin: 3.645", badge: "+11,4%", ok: true },
+          { name: "Artículos / Ticket", val: "2,7", sub: "Real: 2,72 → 2,66", badge: "-2,3% exacto", ok: true, focus: true },
+          { name: "Precio Medio", val: "$63.427", sub: "1.ª Quin: $64.626", badge: "-1,9%", ok: false },
+          { name: "Conversión", val: "36,22%", sub: "1.ª Quin: 34,90%", badge: "+1,32 pp", ok: true }
+        ]
+      }
+    };
+
+    function updateKpis(mode) {
+      document.querySelectorAll('.mode-pill').forEach(b => b.classList.remove('active'));
+      document.getElementById('pill-' + mode).classList.add('active');
+      document.getElementById('subtitle-mode').textContent = kpiData[mode].subtitle;
+
+      document.getElementById('kpi-container').innerHTML = kpiData[mode].items.map(k => `
+        <div class="card p-4 ${k.focus ? 'ring-2 ring-[#3643ba] bg-indigo-50/20' : ''}">
+          <span class="text-xs font-bold uppercase ${k.focus ? 'text-[#3643ba]' : 'text-slate-400'}">${k.name}</span>
+          <div class="text-2xl sm:text-3xl font-black text-slate-900 mt-1">${k.val}</div>
+          <div class="flex items-center justify-between mt-3 pt-2 border-t border-slate-100">
+            <span class="text-[11px] text-slate-500 font-medium">${k.sub}</span>
+            <span class="text-[11px] font-extrabold px-2 py-0.5 rounded-md ${k.ok ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}">${k.badge}</span>
+          </div>
+        </div>
+      `).join('');
+    }
+    updateKpis('yoy');
+
+    // GRÁFICOS CHART.JS
+    Chart.defaults.font.family = "'Inter', sans-serif";
+    Chart.defaults.color = '#64748b';
+
+    // 1. La Flora vs Colombia (Variaciones YoY)
+    new Chart(document.getElementById('chartColVsFlora'), {
+      type: 'bar',
+      data: {
+        labels: ['Ventas', 'Tickets', 'Cesta Media', 'Artículos/Ticket', 'Precio Medio', 'Conversión'],
+        datasets: [
+          { label: 'La Flora (% YoY)', data: [32.8, 17.31, 13.2, 8.0, 4.8, 15.06], backgroundColor: '#3643ba', borderRadius: 6 },
+          { label: 'Colombia (% YoY)', data: [4.8, 4.18, 0.61, -0.3, 0.9, 5.95], backgroundColor: '#cbd5e1', borderRadius: 6 }
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { position: 'top' } },
+        scales: { y: { ticks: { callback: v => v + '%' } } }
+      }
+    });
+
+    // 2. Ranking Conversión
+    new Chart(document.getElementById('chartRanking'), {
+      type: 'bar',
+      data: {
+        labels: ['1. Calle 80', '2. LA FLORA', '3. Plaza Claro', '4. Fontanar', '5. Pereira', '6. La Colina', 'Jardín Plaza (Cali)', 'PROMEDIO PAÍS'],
+        datasets: [{
+          label: 'Conversión Sep 2026 (%)',
+          data: [47.8, 35.6, 35.2, 32.5, 32.0, 31.4, 29.4, 29.03],
+          backgroundColor: ctx => ctx.dataIndex === 1 ? '#10b981' : (ctx.dataIndex === 7 ? '#0f172a' : '#3643ba'),
+          borderRadius: 6
+        }]
+      },
+      options: {
+        indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: { x: { max: 52, ticks: { callback: v => v + '%' } } }
+      }
+    });
+
+    // 3. Evolutivo Artículos por Ticket
+    new Chart(document.getElementById('chartUptLine'), {
+      type: 'line',
+      data: {
+        labels: ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep'],
+        datasets: [
+          {
+            label: '2026 (La Flora)',
+            data: [2.61, 2.59, 2.52, 2.50, 2.62, 2.56, 2.72, 2.74, 2.69],
+            borderColor: '#3643ba', backgroundColor: 'rgba(54, 67, 186, 0.1)',
+            borderWidth: 3.5, pointRadius: 5, fill: true, tension: 0.3
+          },
+          {
+            label: '2025 (La Flora)',
+            data: [2.62, 2.56, 2.51, 2.49, 2.49, 2.63, 2.57, 2.62, 2.49],
+            borderColor: '#94a3b8', borderDash: [5, 5], borderWidth: 2, pointRadius: 3, tension: 0.3
+          }
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        scales: { y: { min: 2.35, max: 2.85 } }
+      }
+    });
+
+    // 4. Precio Medio y Cesta Media
+    new Chart(document.getElementById('chartPriceBasket'), {
+      type: 'bar',
+      data: {
+        labels: ['Sep 2025', 'Ago 2026', 'Sep 2026', 'Colombia 26'],
+        datasets: [
+          { label: 'Cesta Media', data: [152061, 175936, 172135, 167346], backgroundColor: '#3643ba', borderRadius: 6 },
+          { label: 'Precio Medio Art.', data: [61055, 64311, 64001, 66230], backgroundColor: '#10b981', borderRadius: 6 }
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        scales: { y: { ticks: { callback: v => '$' + (v/1000) + 'k' } } }
+      }
+    });
+
+    // 5. Multiimplantación por Deporte (Lineal cruzado, Nariz de Caja y Cabecera)
+    new Chart(document.getElementById('chartMultiStack'), {
+      type: 'bar',
+      data: {
+        labels: ['Montaña (80%)', 'Colectivos (67%)', 'Fitness (80%)', 'Agua (89%)', 'Running (39%)', 'Nariz Caja / A.C. (72%)', 'Ciclismo (0%)'],
+        datasets: [
+          { label: 'En Multi: Lineal / Nariz Caja / Cabecera (349 uds)', data: [93, 70, 80, 62, 23, 21, 0], backgroundColor: '#10b981', borderRadius: 5 },
+          { label: 'Ubicación Única / Lineal Estándar (137 uds)', data: [23, 35, 20, 8, 36, 8, 7], backgroundColor: '#cbd5e1', borderRadius: 5 }
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        scales: { x: { stacked: true }, y: { stacked: true } }
+      }
+    });
+  </script>
+</body>
+</html>
